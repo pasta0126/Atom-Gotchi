@@ -1,0 +1,24 @@
+name: atom_gotchi
+description: Companion app for AtomGotchi (M5Stack Atom S3R)
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  flutter_blue_plus: ^1.31.0    # BLE
+  battery_plus: ^6.0.1           # Batería del teléfono
+  permission_handler: ^11.3.1    # Permisos runtime
+  provider: ^6.1.2               # State management
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
