@@ -15,6 +15,7 @@ app/ios/
 app/linux/
 app/macos/
 app/windows/
+app/web/
 
 # ── Editor / IDE ──────────────────────────────────────────────────────────────
 .vscode/
