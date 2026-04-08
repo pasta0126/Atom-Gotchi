@@ -178,9 +178,3 @@ The `firmware/lib/M5Stack-Avatar/` copy contains the following changes vs upstre
 | `Avatar.cpp` | Increased `drawLoop` stack from 2048 → 8192 bytes |
 | `Effect.h` | Scaled icon positions from 320×240 → 128×128; icons use `COLOR_SECONDARY` (mood accent color) |
 | `ColorPalette.h/cpp` | Added `COLOR_BORDER` key; fixed `set()` to handle new keys without UB |
-
----
-
-## License
-
-[MIT](LICENSE)
