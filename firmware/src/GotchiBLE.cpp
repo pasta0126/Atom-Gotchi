@@ -4,7 +4,7 @@
 GotchiBLE::GotchiBLE(GotchiState& state)
     : _state(state), _connected(false),
       _pServer(nullptr), _pStateChar(nullptr),
-      _pCmdChar(nullptr), _pPhoneChar(nullptr)
+      _pCmdChar(nullptr), _pPhoneChar(nullptr), _pContextChar(nullptr)
 {}
 
 void GotchiBLE::begin() {
@@ -35,6 +35,13 @@ void GotchiBLE::begin() {
         NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
     );
     _pPhoneChar->setCallbacks(this);
+
+    // Característica de contexto: [hora(0-23), temp_c(signed), flags]
+    _pContextChar = pService->createCharacteristic(
+        GOTCHI_CONTEXT_CHAR_UUID,
+        NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
+    );
+    _pContextChar->setCallbacks(this);
 
     pService->start();
 
@@ -102,5 +109,13 @@ void GotchiBLE::onWrite(NimBLECharacteristic* pChar) {
         uint8_t level    = (uint8_t)val[0];
         bool    charging = (val.size() >= 2) && (val[1] & 0x01);
         _state.onPhoneBattery(level, charging);
+
+    } else if (uuid == GOTCHI_CONTEXT_CHAR_UUID) {
+        // Contexto del teléfono: [0]=hora(0-23), [1]=temp_c(signed), [2]=flags(reservado)
+        std::string val = pChar->getValue();
+        if (val.size() < 2) return;
+        uint8_t hour  = (uint8_t)val[0] % 24;
+        int8_t  tempC = (int8_t)val[1];
+        _state.onContext(hour, tempC);
     }
 }

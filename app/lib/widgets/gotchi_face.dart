@@ -102,6 +102,19 @@ class _FacePainter extends CustomPainter {
         _eyeClosed(canvas, rex, ey, fr * 0.17);
         _mouthSmile(canvas, cx, my - fr * 0.05, fr * 0.25);
         _drawZzz(canvas, cx + fr * 0.5, cy - fr * 0.8);
+      case GotchiMood.startled:
+        _eyeWide(canvas, lex, ey, fr * 0.23);
+        _eyeWide(canvas, rex, ey, fr * 0.23);
+        _mouthOpen(canvas, cx, my + fr * 0.05, fr * 0.22, fr * 0.17);
+        _drawSweat(canvas, cx + fr * 0.7, cy - fr * 0.5, fr * 0.08);
+        _drawShockLines(canvas, cx, cy, fr);
+      case GotchiMood.annoyed:
+        _eyeHalf(canvas, lex, ey, fr * 0.17);
+        _eyeHalf(canvas, rex, ey, fr * 0.17);
+        _eyebrowFlat(canvas, lex, ey, fr * 0.17);
+        _eyebrowFlat(canvas, rex, ey, fr * 0.17);
+        _mouthFrown(canvas, cx, my, fr * 0.28);
+        _drawSoundWaves(canvas, cx, cy, fr);
     }
   }
 
@@ -268,6 +281,47 @@ class _FacePainter extends CustomPainter {
           ..strokeCap = StrokeCap.round);
   }
 
+  void _eyebrowFlat(Canvas canvas, double x, double y, double r) {
+    canvas.drawLine(
+      Offset(x - r * 0.9, y - r * 1.3),
+      Offset(x + r * 0.9, y - r * 1.3),
+      Paint()
+        ..color = Colors.black
+        ..strokeWidth = 3
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  void _drawShockLines(Canvas canvas, double cx, double cy, double fr) {
+    final p = Paint()
+      ..color = Colors.yellow
+      ..strokeWidth = 2.5
+      ..strokeCap = StrokeCap.round;
+    final top = cy - fr;
+    canvas.drawLine(Offset(cx - fr * 0.3, top - fr * 0.15), Offset(cx - fr * 0.15, top + fr * 0.1), p);
+    canvas.drawLine(Offset(cx + fr * 0.15, top + fr * 0.1), Offset(cx + fr * 0.3, top - fr * 0.15), p);
+    canvas.drawLine(Offset(cx - fr * 0.06, top - fr * 0.2), Offset(cx + fr * 0.06, top - fr * 0.2), p);
+  }
+
+  void _drawSoundWaves(Canvas canvas, double cx, double cy, double fr) {
+    final p = Paint()
+      ..color = const Color(0xFFFF8800)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+    for (int i = 1; i <= 3; i++) {
+      final r = fr + i * fr * 0.15;
+      canvas.drawArc(
+        Rect.fromCircle(center: Offset(cx - fr * 1.3, cy), radius: r),
+        -0.5, 1.0, false, p,
+      );
+      canvas.drawArc(
+        Rect.fromCircle(center: Offset(cx + fr * 1.3, cy), radius: r),
+        math.pi - 0.5, 1.0, false, p,
+      );
+    }
+  }
+
   // ── Extras ────────────────────────────────────────────────────────────────
 
   void _drawTear(Canvas canvas, double x, double y, double r) {
@@ -302,7 +356,7 @@ class _FacePainter extends CustomPainter {
           text: TextSpan(
               text: i == 0 ? 'z' : 'Z',
               style: TextStyle(
-                  color: Colors.white.withOpacity(alphas[i]),
+                  color: Colors.white.withValues(alpha: alphas[i]),
                   fontSize: sizes[i],
                   fontWeight: FontWeight.bold)),
           textDirection: TextDirection.ltr)
@@ -325,6 +379,8 @@ class _FacePainter extends CustomPainter {
         GotchiMood.angry    => const Color(0xFFCC0000),
         GotchiMood.sad      => const Color(0xFF1144AA),
         GotchiMood.sleeping => const Color(0xFF050520),
+        GotchiMood.startled => const Color(0xFFFF6600),
+        GotchiMood.annoyed  => const Color(0xFF3A1A00),
       };
 
   Color _faceColor() => switch (mood) {
@@ -334,6 +390,8 @@ class _FacePainter extends CustomPainter {
         GotchiMood.angry    => const Color(0xFFFFBB88),
         GotchiMood.sad      => const Color(0xFFCCDDFF),
         GotchiMood.sleeping => const Color(0xFFBBCCEE),
+        GotchiMood.startled => const Color(0xFFFFEECC),
+        GotchiMood.annoyed  => const Color(0xFFDDBC99),
         _                   => const Color(0xFFFFE000),
       };
 

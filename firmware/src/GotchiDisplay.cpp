@@ -1,400 +1,416 @@
 #include "GotchiDisplay.h"
+#include <math.h>
 
-// Colores básicos (RGB565 pero M5GFX acepta RGB888 con color24to16 automático)
-#define C_WHITE    0xFFFFFF
-#define C_BLACK    0x000000
-#define C_YELLOW   0xFFE000
-#define C_RED      0xFF2020
-#define C_BLUE     0x2060FF
-#define C_GREEN    0x30CC30
-#define C_PURPLE   0xAA44FF
-#define C_ORANGE   0xFF8000
-#define C_CYAN     0x00CCFF
-#define C_DARKBLUE 0x102060
-#define C_GRAY     0x888888
-#define C_PINK     0xFF6688
+// ─── Singleton ────────────────────────────────────────────────────────────────
+GotchiDisplay* GotchiDisplay::_instance = nullptr;
 
+// ─── Constructor ─────────────────────────────────────────────────────────────
 GotchiDisplay::GotchiDisplay()
-    : _lastMood(Mood::HAPPY), _moodChanged(true),
-      _lastDraw(0), _blinkOpen(true), _nextBlink(3000)
-{}
+    : _avatar(nullptr),
+      _imuAx(0), _imuAy(0), _micRms(0),
+      _currentMood((uint8_t)Mood::HAPPY),
+      _alertPending(false), _alertUntil(0),
+      _warnHunger(false), _warnThirst(false), _warnEnergy(false),
+      _lifeState(LifeState::IDLE),
+      _stateUntil(0), _nextGlanceMs(0), _soundReactUntil(0),
+      _gazeH(0), _gazeV(0), _targetGazeH(0), _targetGazeV(0),
+      _lastMood(255),
+      _moodFlashUntil(0)
+{
+    memset(_alertText, 0, sizeof(_alertText));
+}
 
+// ─── begin ────────────────────────────────────────────────────────────────────
 void GotchiDisplay::begin() {
+    _instance = this;
+
     M5.Display.setBrightness(180);
-    M5.Display.setTextFont(0);
-    M5.Display.setTextSize(1);
-    _setLED(C_GREEN);
+    M5.Display.fillScreen(TFT_BLACK);
+
+    // ── Face escalado a 128×128 ──────────────────────────────────────────
+    // El Face por defecto usa coords para 320×240.
+    // Factores: x *= 0.40 (128/320), y *= 0.533 (128/240)
+    //
+    //  Componente      original (top, left)    → escalado
+    //  Mouth(50,90,4,60)  @ (148, 163)         → (79, 65)
+    //  Eye  r=8           @ (93,  90) / (96, 230) → (50,36) / (51,92)
+    //  Eyeblow w=32       @ (67,  96) / (72, 230) → (36,38) / (38,92)
+
+    // Crear face y avatar aquí (después de M5.begin()) para evitar que el
+    // constructor de M5Canvas se ejecute antes de que el hardware esté
+    // inicializado. Pasamos face128 directamente al constructor de Avatar
+    // para evitar cualquier ventana con face==nullptr.
+    auto* face128 = new Face(
+        new Mouth(20, 36, 2, 24),   new BoundingRect(68, 65),
+        new Eye(4, false),          new BoundingRect(50, 36),
+        new Eye(4, true),           new BoundingRect(51, 92),
+        new Eyeblow(13, 0, false),  new BoundingRect(36, 38),
+        new Eyeblow(13, 0, true),   new BoundingRect(38, 92),
+        new BoundingRect(0, 0, 128, 128),
+        new M5Canvas(&M5.Display),
+        new M5Canvas(&M5.Display)
+    );
+
+    _avatar = new Avatar(face128);
+    _avatar->setColorPalette(_neutralPalette());  // arrancar en negro con cara blanca
+
+    // Arrancar primero (colorDepth=16 para display color), luego addTask para
+    // que isDrawing()==true cuando la tarea de comportamiento empiece.
+    _avatar->start(16);
+    _avatar->addTask(_behaviorTask, "gotchi_life", 4096, 1);
+
+    _setLED(_moodToLED(Mood::HAPPY));
 }
 
-// ─── Update principal ─────────────────────────────────────────────────────────
+// ─── update (main loop) ───────────────────────────────────────────────────────
+void GotchiDisplay::update(const GotchiStats& stats, float ax, float ay, float micRms) {
+    // Actualizar datos compartidos (leídos por la tarea de Avatar)
+    _imuAx   = ax;
+    _imuAy   = ay;
+    _micRms  = micRms;
+    _currentMood = (uint8_t)stats.mood;
 
-void GotchiDisplay::update(const GotchiStats& stats) {
+    // Aplicar estilo si cambió el mood
+    if (_lastMood != (uint8_t)stats.mood) {
+        _lastMood = (uint8_t)stats.mood;
+        _applyMoodStyle(stats.mood);
+    }
+
+    // ── Alertas de stats < 20% ────────────────────────────────────────────
     unsigned long now = millis();
-    if (now - _lastDraw < 100) return; // 10 fps máx
-    _lastDraw = now;
 
-    // Gestión de parpadeo
-    if (now >= _nextBlink) {
-        _blinkOpen = !_blinkOpen;
-        _nextBlink = now + (_blinkOpen ? random(3000, 6000) : 180);
+    // Resetear flags cuando el stat se recupera
+    if (stats.hunger >= 30) _warnHunger = false;
+    if (stats.thirst >= 30) _warnThirst = false;
+    if (stats.energy >= 30) _warnEnergy = false;
+
+    if (!_alertPending && now >= _alertUntil) {
+        if (stats.hunger < 20 && !_warnHunger) {
+            _warnHunger = true;
+            strncpy(_alertText, "Tengo hambre...", sizeof(_alertText) - 1);
+            _alertPending = true;
+            _alertUntil = now + 4000;
+        } else if (stats.thirst < 20 && !_warnThirst) {
+            _warnThirst = true;
+            strncpy(_alertText, "Tengo sed!", sizeof(_alertText) - 1);
+            _alertPending = true;
+            _alertUntil = now + 4000;
+        } else if (stats.energy < 20 && !_warnEnergy &&
+                   stats.mood != Mood::SLEEPING) {
+            _warnEnergy = true;
+            strncpy(_alertText, "Estoy agotado...", sizeof(_alertText) - 1);
+            _alertPending = true;
+            _alertUntil = now + 4000;
+        }
     }
 
-    bool redraw = (stats.mood != _lastMood);
-    _lastMood = stats.mood;
-
-    if (redraw || !_blinkOpen) {
-        _drawFace(stats.mood, _blinkOpen);
-        _drawStatusBar(stats.hunger, stats.thirst, stats.energy);
-        if (stats.phoneBatteryWarn) _drawBatteryWarn(100, 4);
-        M5.Display.display();
-    }
-}
-
-// ─── Despachador de caras ─────────────────────────────────────────────────────
-
-void GotchiDisplay::_drawFace(Mood mood, bool blink) {
-    switch (mood) {
-        case Mood::HAPPY:    _drawHappy(blink);    _setLED(C_GREEN);   break;
-        case Mood::TIRED:    _drawTired(blink);    _setLED(C_BLUE);    break;
-        case Mood::HUNGRY:   _drawHungry(blink);   _setLED(C_ORANGE);  break;
-        case Mood::THIRSTY:  _drawThirsty(blink);  _setLED(C_CYAN);    break;
-        case Mood::DIZZY:    _drawDizzy();          _setLED(C_PURPLE);  break;
-        case Mood::EXCITED:  _drawExcited(blink);  _setLED(C_YELLOW);  break;
-        case Mood::SCARED:   _drawScared(blink);   _setLED(C_RED);     break;
-        case Mood::LAUGHING: _drawLaughing();       _setLED(C_GREEN);   break;
-        case Mood::ANGRY:    _drawAngry(blink);    _setLED(C_RED);     break;
-        case Mood::SAD:      _drawSad(blink);      _setLED(C_BLUE);    break;
-        case Mood::SLEEPING: _drawSleeping();       _setLED(0x110022);  break;
+    // Limpiar balloon cuando expire
+    if (now >= _alertUntil && _alertUntil > 0) {
+        _avatar->setSpeechText("");
+        _alertUntil = 0;
     }
 }
 
-// ─── Primitivos ───────────────────────────────────────────────────────────────
+// ─── _applyMoodStyle ─────────────────────────────────────────────────────────
+void GotchiDisplay::_applyMoodStyle(Mood m) {
+    _avatar->setExpression(_moodToExpression(m));
 
-void GotchiDisplay::_background(uint32_t color) {
-    M5.Display.fillScreen(color);
+    // Paleta neutra + acento del mood: icono de efecto en color + borde 0.5s
+    ColorPalette cp = _neutralPalette();
+    uint16_t accent = _moodAccent565(m);
+    cp.set(COLOR_SECONDARY, accent);   // color del icono manga (permanente)
+    cp.set(COLOR_BORDER,    accent);   // borde inferior (sólo 0.5 s)
+    _avatar->setColorPalette(cp);
+
+    _moodFlashUntil = millis() + 500;
+    _setLED(_moodToLED(m));
 }
 
-void GotchiDisplay::_drawFaceCircle(uint32_t color) {
-    M5.Display.fillCircle(CX, FY, FR, color);
-    M5.Display.drawCircle(CX, FY, FR, C_BLACK);
-}
+// ─── Tarea de comportamiento autónomo ────────────────────────────────────────
+// Corre en FreeRTOS, ~50 ms por frame
+void GotchiDisplay::_behaviorTask(void* arg) {
+    DriveContext* ctx = (DriveContext*)arg;
+    Avatar* av = ctx->getAvatar();
 
-void GotchiDisplay::_eyeOpen(int x, int y, uint32_t sclera, uint32_t pupil) {
-    M5.Display.fillCircle(x, y, 8, sclera);
-    M5.Display.fillCircle(x + 1, y + 1, 4, pupil);
-}
-
-void GotchiDisplay::_eyeHalf(int x, int y, uint32_t sclera, uint32_t pupil, uint32_t bg) {
-    M5.Display.fillCircle(x, y, 8, sclera);
-    M5.Display.fillRect(x - 9, y - 10, 19, 10, bg); // tapa mitad superior
-    M5.Display.fillCircle(x + 1, y + 2, 4, pupil);
-}
-
-void GotchiDisplay::_eyeClosed(int x, int y, uint32_t color) {
-    M5.Display.drawLine(x - 7, y, x + 7, y, color);
-    M5.Display.drawLine(x - 7, y + 1, x + 7, y + 1, color);
-}
-
-void GotchiDisplay::_eyeWide(int x, int y, uint32_t sclera, uint32_t pupil) {
-    M5.Display.fillCircle(x, y, 11, sclera);
-    M5.Display.fillCircle(x + 1, y + 2, 5, pupil);
-    M5.Display.drawCircle(x, y, 11, C_BLACK);
-}
-
-void GotchiDisplay::_eyeHappy(int x, int y, uint32_t color) {
-    // Forma ^ (ojo feliz tipo anime)
-    for (int t = 0; t < 2; t++) {
-        M5.Display.drawLine(x - 7, y + 4 + t, x, y - 2 + t, color);
-        M5.Display.drawLine(x, y - 2 + t, x + 7, y + 4 + t, color);
+    for (;;) {
+        if (av->isDrawing() && _instance) {
+            _instance->_tick(av);
+        }
+        delay(50);
     }
 }
 
-void GotchiDisplay::_eyeAngry(int x, int y, uint32_t sclera, uint32_t pupil, bool left) {
-    _eyeOpen(x, y, sclera, pupil);
-    // Ceja inclinada
-    if (left) {
-        M5.Display.drawLine(x - 6, y - 8, x + 4, y - 13, C_BLACK);
-        M5.Display.drawLine(x - 6, y - 9, x + 4, y - 14, C_BLACK);
+// ─── _tick: un frame de vida autónoma ────────────────────────────────────────
+void GotchiDisplay::_tick(Avatar* av) {
+    unsigned long now = millis();
+    Mood mood = (Mood)_currentMood;
+
+    // ── 0. Quitar borde tras el flash (0.5s); mantener color del icono ───
+    if (_moodFlashUntil > 0 && now >= _moodFlashUntil) {
+        _moodFlashUntil = 0;
+        ColorPalette cp = _neutralPalette();
+        // Mantener el acento de color en el icono manga
+        cp.set(COLOR_SECONDARY, _moodAccent565((Mood)_currentMood));
+        // COLOR_BORDER queda a negro (default en _neutralPalette) → sin borde
+        av->setColorPalette(cp);
+    }
+
+    // ── 1. Procesar alertas pendientes ────────────────────────────────────
+    if (_alertPending) {
+        av->setSpeechText(_alertText);
+        _alertPending = false;
+    }
+
+    // ── 2. Boca según mood ────────────────────────────────────────────────
+    if (mood == Mood::SLEEPING) {
+        // Respiración: seno lento en la boca
+        float breath = 0.05f + 0.04f * sinf((float)now / 2800.0f);
+        av->setMouthOpenRatio(breath);
     } else {
-        M5.Display.drawLine(x - 4, y - 13, x + 6, y - 8, C_BLACK);
-        M5.Display.drawLine(x - 4, y - 14, x + 6, y - 9, C_BLACK);
+        float ratio = _moodMouthRatio(mood);
+        // Pequeño pulso en moods excitados
+        if (mood == Mood::EXCITED || mood == Mood::LAUGHING) {
+            ratio += 0.1f * sinf((float)now / 400.0f);
+        }
+        av->setMouthOpenRatio(constrain(ratio, 0.0f, 1.0f));
     }
-}
 
-void GotchiDisplay::_eyeDizzy(int x, int y, uint32_t color) {
-    // Forma X
-    M5.Display.drawLine(x - 6, y - 6, x + 6, y + 6, color);
-    M5.Display.drawLine(x + 6, y - 6, x - 6, y + 6, color);
-    M5.Display.drawLine(x - 7, y - 5, x + 5, y + 7, color);
-    M5.Display.drawLine(x + 7, y - 5, x - 5, y + 7, color);
-}
+    // ── 3. Gaze autónomo: máquina de estados ─────────────────────────────
+    bool isSleeping = (mood == Mood::SLEEPING);
 
-void GotchiDisplay::_eyeStar(int x, int y, uint32_t color) {
-    M5.Display.drawLine(x, y - 9, x, y + 9, color);
-    M5.Display.drawLine(x - 9, y, x + 9, y, color);
-    M5.Display.drawLine(x - 6, y - 6, x + 6, y + 6, color);
-    M5.Display.drawLine(x + 6, y - 6, x - 6, y + 6, color);
-}
-
-// Boca: ángulos M5GFX: 0=arriba(12h), 90=derecha, 180=abajo, 270=izquierda
-void GotchiDisplay::_mouthSmile(int cx, int cy) {
-    // Centro encima de la boca, arco en parte inferior = sonrisa
-    M5.Display.fillArc(cx, cy - 8, 12, 17, 130, 230, C_BLACK);
-}
-
-void GotchiDisplay::_mouthFrown(int cx, int cy) {
-    // Centro debajo de la boca, arco en parte superior = mueca
-    M5.Display.fillArc(cx, cy + 8, 12, 17, 310, 50, C_BLACK);
-}
-
-void GotchiDisplay::_mouthOpen(int cx, int cy) {
-    M5.Display.fillEllipse(cx, cy, 12, 9, C_BLACK);
-}
-
-void GotchiDisplay::_mouthGrin(int cx, int cy) {
-    // Sonrisa ancha con dientes
-    M5.Display.fillRect(cx - 13, cy - 5, 26, 12, C_BLACK);
-    M5.Display.fillRect(cx - 12, cy - 4, 24, 7, C_WHITE);
-    // Separadores dientes
-    M5.Display.drawLine(cx - 4, cy - 4, cx - 4, cy + 3, C_BLACK);
-    M5.Display.drawLine(cx + 4, cy - 4, cx + 4, cy + 3, C_BLACK);
-}
-
-void GotchiDisplay::_mouthTongue(int cx, int cy) {
-    M5.Display.fillEllipse(cx, cy, 10, 7, C_BLACK);
-    M5.Display.fillEllipse(cx, cy + 4, 7, 5, C_PINK);
-}
-
-void GotchiDisplay::_mouthWavy(int cx, int cy) {
-    // Boca ondulada (hambriento)
-    for (int i = -12; i <= 12; i += 4) {
-        int y0 = cy + (i % 8 == 0 ? -2 : 2);
-        int y1 = cy + ((i + 4) % 8 == 0 ? -2 : 2);
-        M5.Display.drawLine(cx + i, y0, cx + i + 4, y1, C_BLACK);
-        M5.Display.drawLine(cx + i, y0 + 1, cx + i + 4, y1 + 1, C_BLACK);
+    // Transición de estado
+    if (now >= _stateUntil) {
+        if (isSleeping) {
+            _lifeState   = LifeState::SLEEPY_DRIFT;
+            _stateUntil  = now + random(4000, 8000);
+            // Gaze muy suave en sleep
+            _targetGazeH = (random(100) / 100.0f - 0.5f) * 0.2f;
+            _targetGazeV = 0.1f + (random(100) / 100.0f) * 0.1f; // ojos hacia abajo
+        } else {
+            // Seleccionar próximo estado aleatorio
+            int r = random(10);
+            if (r < 5) {
+                // IDLE: mirada al frente con pequeña deriva
+                _lifeState   = LifeState::IDLE;
+                _targetGazeH = (random(100) / 100.0f - 0.5f) * 0.15f;
+                _targetGazeV = (random(100) / 100.0f - 0.5f) * 0.1f;
+                _stateUntil  = now + random(2000, 5000);
+            } else if (r < 8) {
+                // GLANCING: mirar a un lado
+                _lifeState   = LifeState::GLANCING;
+                _targetGazeH = (random(2) ? 1.0f : -1.0f) * (0.4f + random(40) / 100.0f);
+                _targetGazeV = (random(100) / 100.0f - 0.5f) * 0.3f;
+                _stateUntil  = now + random(800, 2000);
+            } else {
+                // CURIOUS: mirar con interés (arriba ligeramente)
+                _lifeState   = LifeState::CURIOUS;
+                _targetGazeH = (random(100) / 100.0f - 0.5f) * 0.5f;
+                _targetGazeV = -0.2f - random(20) / 100.0f; // ojos arriba
+                _stateUntil  = now + random(1200, 2500);
+            }
+        }
     }
-}
 
-// ─── Extras ───────────────────────────────────────────────────────────────────
-
-void GotchiDisplay::_drawTear(int x, int y) {
-    M5.Display.fillCircle(x, y, 3, C_CYAN);
-    M5.Display.fillTriangle(x - 3, y, x + 3, y, x, y + 6, C_CYAN);
-}
-
-void GotchiDisplay::_drawSweat(int x, int y) {
-    M5.Display.fillCircle(x, y, 3, C_CYAN);
-    M5.Display.fillTriangle(x - 2, y, x + 2, y, x, y + 5, C_CYAN);
-}
-
-void GotchiDisplay::_drawZzz(int x, int y) {
-    M5.Display.setTextColor(C_WHITE);
-    M5.Display.setTextSize(1);
-    M5.Display.setCursor(x, y);
-    M5.Display.print("z");
-    M5.Display.setCursor(x + 5, y - 5);
-    M5.Display.print("Z");
-    M5.Display.setCursor(x + 11, y - 10);
-    M5.Display.print("Z");
-}
-
-void GotchiDisplay::_drawBatteryWarn(int x, int y) {
-    // Icono batería pequeño rojo en esquina
-    M5.Display.fillRect(x, y, 18, 10, C_RED);
-    M5.Display.fillRect(x + 18, y + 3, 3, 4, C_RED);
-    M5.Display.fillRect(x + 1, y + 1, 5, 8, C_BLACK); // barra casi vacía
-    M5.Display.setTextColor(C_WHITE);
-    M5.Display.setTextSize(1);
-    M5.Display.setCursor(x + 7, y + 2);
-    M5.Display.print("!");
-}
-
-void GotchiDisplay::_drawStatusBar(uint8_t hunger, uint8_t thirst, uint8_t energy) {
-    int barW = 36;
-    int barH = 6;
-    int y = BAR_Y;
-
-    // Fondo oscuro
-    M5.Display.fillRect(0, y - 8, 128, 28, 0x111111);
-
-    // Iconos y barras: [H] [T] [E]
-    const char* labels[] = { "H", "T", "E" };
-    uint8_t     vals[]   = { hunger, thirst, energy };
-    uint32_t    colors[] = { C_ORANGE, C_CYAN, C_GREEN };
-
-    for (int i = 0; i < 3; i++) {
-        int x = 4 + i * 42;
-        M5.Display.setTextColor(colors[i]);
-        M5.Display.setTextSize(1);
-        M5.Display.setCursor(x, y - 6);
-        M5.Display.print(labels[i]);
-
-        // Fondo barra
-        M5.Display.fillRect(x, y + 1, barW, barH, 0x333333);
-        // Relleno
-        int fill = (vals[i] * barW) / 100;
-        M5.Display.fillRect(x, y + 1, fill, barH, colors[i]);
+    // ── 4. Reacción al sonido ─────────────────────────────────────────────
+    float rms = _micRms;
+    if (!isSleeping && rms > 700.0f && now > _soundReactUntil) {
+        // Oyó algo: mirar hacia donde "viene" el sonido (aleatorio, único mic)
+        _lifeState        = LifeState::SOUND_REACT;
+        _targetGazeH      = (random(2) ? 0.8f : -0.8f);
+        _targetGazeV      = -0.15f;  // ligeramente hacia arriba (curioso)
+        _soundReactUntil  = now + 2500;
+        _stateUntil       = now + 2000;
     }
+
+    // ── 5. Influencia del IMU en el gaze ─────────────────────────────────
+    // El acelerómetro aporta un leve desplazamiento de los ojos
+    // al inclinar el dispositivo (sensación de gravedad en los ojos)
+    float imuInfluenceH = constrain((float)_imuAx * 0.4f, -0.6f, 0.6f);
+    float imuInfluenceV = constrain(-(float)_imuAy * 0.25f, -0.4f, 0.4f);
+
+    // ── 6. Suavizado hacia target (lerp) ──────────────────────────────────
+    float speed = isSleeping ? 0.04f : 0.12f;
+    float finalH = _targetGazeH + imuInfluenceH * 0.35f;
+    float finalV = _targetGazeV + imuInfluenceV * 0.35f;
+    _gazeH += (finalH - _gazeH) * speed;
+    _gazeV += (finalV - _gazeV) * speed;
+
+    float gh = constrain(_gazeH, -1.0f, 1.0f);
+    float gv = constrain(_gazeV, -1.0f, 1.0f);
+
+    av->setRightGaze(gv, gh);
+    av->setLeftGaze(gv, gh);
 }
 
-// ─── LED RGB (M5Atom LED único) ───────────────────────────────────────────────
-
+// ─── LED ──────────────────────────────────────────────────────────────────────
 void GotchiDisplay::_setLED(uint32_t rgb) {
-    // M5Unified Atom: M5.dis.drawpix(index, color)
-    M5.dis.drawpix(0, rgb);
-    M5.dis.show();
+    M5.Led.setColor(0, (uint8_t)(rgb >> 16), (uint8_t)(rgb >> 8), (uint8_t)(rgb));
 }
 
-// ─── Caras ────────────────────────────────────────────────────────────────────
+// ─── Mapeos mood → Avatar ─────────────────────────────────────────────────────
 
-void GotchiDisplay::_drawHappy(bool blink) {
-    _background(0x88DDAA);
-    _drawFaceCircle(C_YELLOW);
-    if (!blink) {
-        _eyeOpen(LEX, EY, C_WHITE, C_BLACK);
-        _eyeOpen(REX, EY, C_WHITE, C_BLACK);
-    } else {
-        _eyeClosed(LEX, EY, C_BLACK);
-        _eyeClosed(REX, EY, C_BLACK);
+Expression GotchiDisplay::_moodToExpression(Mood m) {
+    switch (m) {
+        case Mood::HAPPY:    return Expression::Happy;
+        case Mood::LAUGHING: return Expression::Happy;
+        case Mood::EXCITED:  return Expression::Happy;
+        case Mood::TIRED:    return Expression::Sleepy;
+        case Mood::SLEEPING: return Expression::Sleepy;
+        case Mood::HUNGRY:   return Expression::Sad;
+        case Mood::THIRSTY:  return Expression::Sad;
+        case Mood::SAD:      return Expression::Sad;
+        case Mood::ANGRY:    return Expression::Angry;
+        case Mood::ANNOYED:  return Expression::Angry;
+        case Mood::SCARED:   return Expression::Doubt;
+        case Mood::STARTLED: return Expression::Doubt;
+        case Mood::DIZZY:    return Expression::Doubt;
+        default:             return Expression::Neutral;
     }
-    _mouthSmile(CX, MY);
 }
 
-void GotchiDisplay::_drawTired(bool blink) {
-    _background(0x334466);
-    _drawFaceCircle(0xDDCCAA);
-    if (!blink) {
-        _eyeHalf(LEX, EY, C_WHITE, C_BLACK, 0xDDCCAA);
-        _eyeHalf(REX, EY, C_WHITE, C_BLACK, 0xDDCCAA);
-    } else {
-        _eyeClosed(LEX, EY, C_BLACK);
-        _eyeClosed(REX, EY, C_BLACK);
+ColorPalette GotchiDisplay::_moodToColorPalette(Mood m) {
+    ColorPalette cp;
+    // COLOR_PRIMARY = color de cara, COLOR_BACKGROUND = fondo,
+    // COLOR_SECONDARY = color secundario (cejas, boca, etc.)
+    switch (m) {
+        case Mood::HAPPY:
+            cp.set(COLOR_PRIMARY,    (uint16_t)M5.Display.color565(255, 220,  50));
+            cp.set(COLOR_BACKGROUND, (uint16_t)M5.Display.color565(100, 200, 120));
+            cp.set(COLOR_SECONDARY,  (uint16_t)M5.Display.color565( 30,  30,  30));
+            break;
+        case Mood::LAUGHING:
+            cp.set(COLOR_PRIMARY,    (uint16_t)M5.Display.color565(255, 230,  80));
+            cp.set(COLOR_BACKGROUND, (uint16_t)M5.Display.color565(150, 255,  70));
+            cp.set(COLOR_SECONDARY,  (uint16_t)M5.Display.color565( 20,  20,  20));
+            break;
+        case Mood::EXCITED:
+            cp.set(COLOR_PRIMARY,    (uint16_t)M5.Display.color565(255, 240, 100));
+            cp.set(COLOR_BACKGROUND, (uint16_t)M5.Display.color565(255, 220,   0));
+            cp.set(COLOR_SECONDARY,  (uint16_t)M5.Display.color565( 20,  20,  20));
+            break;
+        case Mood::TIRED:
+            cp.set(COLOR_PRIMARY,    (uint16_t)M5.Display.color565(210, 195, 160));
+            cp.set(COLOR_BACKGROUND, (uint16_t)M5.Display.color565( 50,  60,  90));
+            cp.set(COLOR_SECONDARY,  (uint16_t)M5.Display.color565( 20,  20,  20));
+            break;
+        case Mood::SLEEPING:
+            cp.set(COLOR_PRIMARY,    (uint16_t)M5.Display.color565(185, 200, 220));
+            cp.set(COLOR_BACKGROUND, (uint16_t)M5.Display.color565(  5,   5,  30));
+            cp.set(COLOR_SECONDARY,  (uint16_t)M5.Display.color565( 15,  15,  50));
+            break;
+        case Mood::HUNGRY:
+            cp.set(COLOR_PRIMARY,    (uint16_t)M5.Display.color565(255, 220,  80));
+            cp.set(COLOR_BACKGROUND, (uint16_t)M5.Display.color565(200,  80,   0));
+            cp.set(COLOR_SECONDARY,  (uint16_t)M5.Display.color565( 20,  20,  20));
+            break;
+        case Mood::THIRSTY:
+            cp.set(COLOR_PRIMARY,    (uint16_t)M5.Display.color565(200, 230, 255));
+            cp.set(COLOR_BACKGROUND, (uint16_t)M5.Display.color565(  0, 100, 180));
+            cp.set(COLOR_SECONDARY,  (uint16_t)M5.Display.color565( 20,  20,  20));
+            break;
+        case Mood::SAD:
+            cp.set(COLOR_PRIMARY,    (uint16_t)M5.Display.color565(190, 210, 255));
+            cp.set(COLOR_BACKGROUND, (uint16_t)M5.Display.color565( 20,  60, 160));
+            cp.set(COLOR_SECONDARY,  (uint16_t)M5.Display.color565( 20,  20,  40));
+            break;
+        case Mood::ANGRY:
+            cp.set(COLOR_PRIMARY,    (uint16_t)M5.Display.color565(255, 170, 120));
+            cp.set(COLOR_BACKGROUND, (uint16_t)M5.Display.color565(190,   0,   0));
+            cp.set(COLOR_SECONDARY,  (uint16_t)M5.Display.color565( 10,   0,   0));
+            break;
+        case Mood::ANNOYED:
+            cp.set(COLOR_PRIMARY,    (uint16_t)M5.Display.color565(215, 180, 140));
+            cp.set(COLOR_BACKGROUND, (uint16_t)M5.Display.color565( 70,  30,   0));
+            cp.set(COLOR_SECONDARY,  (uint16_t)M5.Display.color565( 15,   8,   0));
+            break;
+        case Mood::SCARED:
+            cp.set(COLOR_PRIMARY,    (uint16_t)M5.Display.color565(235, 235, 200));
+            cp.set(COLOR_BACKGROUND, (uint16_t)M5.Display.color565( 15,  15,  30));
+            cp.set(COLOR_SECONDARY,  (uint16_t)M5.Display.color565( 10,  10,  20));
+            break;
+        case Mood::STARTLED:
+            cp.set(COLOR_PRIMARY,    (uint16_t)M5.Display.color565(255, 230, 200));
+            cp.set(COLOR_BACKGROUND, (uint16_t)M5.Display.color565(220,  80,   0));
+            cp.set(COLOR_SECONDARY,  (uint16_t)M5.Display.color565( 20,   5,   0));
+            break;
+        case Mood::DIZZY:
+            cp.set(COLOR_PRIMARY,    (uint16_t)M5.Display.color565(230, 190, 255));
+            cp.set(COLOR_BACKGROUND, (uint16_t)M5.Display.color565( 50,   0,  80));
+            cp.set(COLOR_SECONDARY,  (uint16_t)M5.Display.color565( 80,  20, 120));
+            break;
+        default:
+            cp.set(COLOR_PRIMARY,    (uint16_t)M5.Display.color565(255, 220,  50));
+            cp.set(COLOR_BACKGROUND, (uint16_t)M5.Display.color565(100, 200, 120));
+            cp.set(COLOR_SECONDARY,  (uint16_t)M5.Display.color565( 30,  30,  30));
+            break;
     }
-    _mouthFrown(CX, MY - 2);
+    return cp;
 }
 
-void GotchiDisplay::_drawHungry(bool blink) {
-    _background(0xCC6600);
-    _drawFaceCircle(C_YELLOW);
-    if (!blink) {
-        _eyeOpen(LEX, EY, C_WHITE, C_BLACK);
-        _eyeOpen(REX, EY, C_WHITE, C_BLACK);
-    } else {
-        _eyeClosed(LEX, EY, C_BLACK);
-        _eyeClosed(REX, EY, C_BLACK);
+uint32_t GotchiDisplay::_moodToLED(Mood m) {
+    switch (m) {
+        case Mood::HAPPY:    return 0x003300;
+        case Mood::LAUGHING: return 0x006600;
+        case Mood::EXCITED:  return 0x333300;
+        case Mood::TIRED:    return 0x000022;
+        case Mood::SLEEPING: return 0x050010;
+        case Mood::HUNGRY:   return 0x221100;
+        case Mood::THIRSTY:  return 0x001122;
+        case Mood::SAD:      return 0x000022;
+        case Mood::ANGRY:    return 0x330000;
+        case Mood::ANNOYED:  return 0x110800;
+        case Mood::SCARED:   return 0x100010;
+        case Mood::STARTLED: return 0x220800;
+        case Mood::DIZZY:    return 0x110022;
+        default:             return 0x001100;
     }
-    _mouthWavy(CX, MY);
-    // Gota de baba
-    M5.Display.fillCircle(CX + 10, MY + 10, 3, C_WHITE);
 }
 
-void GotchiDisplay::_drawThirsty(bool blink) {
-    _background(0x0077AA);
-    _drawFaceCircle(C_YELLOW);
-    if (!blink) {
-        _eyeOpen(LEX, EY, C_WHITE, C_BLACK);
-        _eyeOpen(REX, EY, C_WHITE, C_BLACK);
-    } else {
-        _eyeClosed(LEX, EY, C_BLACK);
-        _eyeClosed(REX, EY, C_BLACK);
+ColorPalette GotchiDisplay::_neutralPalette() {
+    ColorPalette cp;
+    uint16_t white = M5.Display.color565(240, 240, 240);
+    uint16_t black = M5.Display.color565(  0,   0,   0);
+    cp.set(COLOR_PRIMARY,            white);
+    cp.set(COLOR_BACKGROUND,         black);
+    cp.set(COLOR_SECONDARY,          black);  // sin icono hasta que cambie el mood
+    cp.set(COLOR_BORDER,             black);  // sin borde
+    cp.set(COLOR_BALLOON_FOREGROUND, white);
+    cp.set(COLOR_BALLOON_BACKGROUND, M5.Display.color565(30, 30, 30));
+    return cp;
+}
+
+uint16_t GotchiDisplay::_moodAccent565(Mood m) {
+    // Colores vivos para iconos manga y borde inferior
+    switch (m) {
+        case Mood::HAPPY:    return M5.Display.color565(  0, 220,  80);  // verde
+        case Mood::LAUGHING: return M5.Display.color565( 80, 255,  50);  // lima
+        case Mood::EXCITED:  return M5.Display.color565(255, 220,   0);  // amarillo
+        case Mood::TIRED:    return M5.Display.color565( 80, 100, 200);  // azul medio
+        case Mood::SLEEPING: return M5.Display.color565( 50,  80, 200);  // azul oscuro
+        case Mood::HUNGRY:   return M5.Display.color565(255, 120,   0);  // naranja
+        case Mood::THIRSTY:  return M5.Display.color565(  0, 150, 255);  // azul agua
+        case Mood::SAD:      return M5.Display.color565( 80, 120, 255);  // azul
+        case Mood::ANGRY:    return M5.Display.color565(255,  30,  30);  // rojo
+        case Mood::ANNOYED:  return M5.Display.color565(200,  80,   0);  // naranja oscuro
+        case Mood::SCARED:   return M5.Display.color565(180,  80, 255);  // violeta
+        case Mood::STARTLED: return M5.Display.color565(255,  80,   0);  // naranja fuerte
+        case Mood::DIZZY:    return M5.Display.color565(200,  50, 255);  // púrpura
+        default:             return M5.Display.color565(200, 200, 200);
     }
-    _mouthTongue(CX, MY);
 }
 
-void GotchiDisplay::_drawDizzy() {
-    _background(0x330055);
-    _drawFaceCircle(0xEEBBFF);
-    _eyeDizzy(LEX, EY, C_BLACK);
-    _eyeDizzy(REX, EY, C_BLACK);
-    // Espirales alrededor de la cabeza
-    for (int a = 0; a < 360; a += 45) {
-        float rad = a * DEG_TO_RAD;
-        int sx = CX + (int)((FR + 6) * cosf(rad));
-        int sy = FY + (int)((FR + 6) * sinf(rad));
-        M5.Display.fillCircle(sx, sy, 2, C_PURPLE);
+float GotchiDisplay::_moodMouthRatio(Mood m) {
+    switch (m) {
+        case Mood::SCARED:
+        case Mood::STARTLED: return 0.75f;
+        case Mood::LAUGHING: return 0.80f;
+        case Mood::EXCITED:  return 0.55f;
+        case Mood::ANGRY:    return 0.30f;
+        case Mood::ANNOYED:  return 0.15f;
+        case Mood::HAPPY:    return 0.25f;
+        case Mood::SAD:
+        case Mood::HUNGRY:
+        case Mood::THIRSTY:  return 0.10f;
+        default:             return 0.05f;
     }
-    _mouthFrown(CX, MY);
-}
-
-void GotchiDisplay::_drawExcited(bool blink) {
-    _background(0xFFDD00);
-    _drawFaceCircle(C_YELLOW);
-    if (!blink) {
-        _eyeStar(LEX, EY, C_BLACK);
-        _eyeStar(REX, EY, C_BLACK);
-    } else {
-        _eyeClosed(LEX, EY, C_BLACK);
-        _eyeClosed(REX, EY, C_BLACK);
-    }
-    _mouthOpen(CX, MY);
-    // Destellos
-    M5.Display.fillCircle(CX - FR - 4, FY - 10, 3, C_WHITE);
-    M5.Display.fillCircle(CX + FR + 4, FY - 10, 3, C_WHITE);
-}
-
-void GotchiDisplay::_drawScared(bool blink) {
-    _background(0x111122);
-    _drawFaceCircle(0xEEEECC);
-    if (!blink) {
-        _eyeWide(LEX, EY, C_WHITE, C_BLACK);
-        _eyeWide(REX, EY, C_WHITE, C_BLACK);
-    } else {
-        _eyeClosed(LEX, EY, C_BLACK);
-        _eyeClosed(REX, EY, C_BLACK);
-    }
-    _mouthOpen(CX, MY + 2);
-    _drawSweat(CX + FR - 5, FY - 20);
-}
-
-void GotchiDisplay::_drawLaughing() {
-    _background(0x99FF44);
-    _drawFaceCircle(C_YELLOW);
-    _eyeHappy(LEX, EY, C_BLACK);
-    _eyeHappy(REX, EY, C_BLACK);
-    _mouthGrin(CX, MY);
-    // Líneas de carcajada
-    M5.Display.drawLine(CX - FR - 8, FY - 5, CX - FR - 2, FY - 2, C_YELLOW);
-    M5.Display.drawLine(CX + FR + 2, FY - 5, CX + FR + 8, FY - 2, C_YELLOW);
-}
-
-void GotchiDisplay::_drawAngry(bool blink) {
-    _background(0xCC0000);
-    _drawFaceCircle(0xFFBB88);
-    if (!blink) {
-        _eyeAngry(LEX, EY, C_WHITE, C_BLACK, true);
-        _eyeAngry(REX, EY, C_WHITE, C_BLACK, false);
-    } else {
-        _eyeClosed(LEX, EY, C_BLACK);
-        _eyeClosed(REX, EY, C_BLACK);
-    }
-    _mouthFrown(CX, MY);
-    // Venas en la frente
-    M5.Display.drawLine(CX - 8, FY - FR + 8, CX - 4, FY - FR + 14, C_RED);
-    M5.Display.drawLine(CX + 4, FY - FR + 8, CX + 8, FY - FR + 14, C_RED);
-}
-
-void GotchiDisplay::_drawSad(bool blink) {
-    _background(0x1144AA);
-    _drawFaceCircle(0xCCDDFF);
-    if (!blink) {
-        _eyeOpen(LEX, EY, C_WHITE, C_BLACK);
-        _eyeOpen(REX, EY, C_WHITE, C_BLACK);
-    } else {
-        _eyeClosed(LEX, EY, C_BLACK);
-        _eyeClosed(REX, EY, C_BLACK);
-    }
-    _mouthFrown(CX, MY);
-    _drawTear(LEX + 2, EY + 12);
-    _drawTear(REX + 2, EY + 12);
-}
-
-void GotchiDisplay::_drawSleeping() {
-    _background(0x050520);
-    _drawFaceCircle(0xBBCCEE);
-    _eyeClosed(LEX, EY, C_BLACK);
-    _eyeClosed(REX, EY, C_BLACK);
-    _mouthSmile(CX, MY - 2);
-    _drawZzz(CX + 15, FY - FR - 5);
-    // Burbuja de ronquido
-    M5.Display.drawCircle(CX + 25, FY - FR - 10, 6, C_GRAY);
 }

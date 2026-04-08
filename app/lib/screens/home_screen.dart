@@ -23,9 +23,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     final ble = context.read<BleService>();
     _batteryService = BatteryService(ble);
-    // Arrancar escaneo automático
-    ble.startScan();
     _batteryService.start();
+    // Arrancar escaneo después del primer frame para evitar notifyListeners durante build
+    WidgetsBinding.instance.addPostFrameCallback((_) => ble.startScan());
   }
 
   @override
@@ -150,21 +150,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Column(
         children: [
-          StatBar(
-              label: 'Hambre',
-              icon: '🍔',
-              value: state.hunger,
-              color: Colors.orange),
-          StatBar(
-              label: 'Sed',
-              icon: '💧',
-              value: state.thirst,
-              color: Colors.lightBlue),
-          StatBar(
-              label: 'Energía',
-              icon: '⚡',
-              value: state.energy,
-              color: Colors.greenAccent),
+          StatBar(icon: '🍔', value: state.hunger,  color: Colors.orange),
+          StatBar(icon: '💧', value: state.thirst,  color: Colors.lightBlue),
+          StatBar(icon: '⚡', value: state.energy,  color: Colors.greenAccent),
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Row(
@@ -212,9 +200,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             width: 64,
             height: 64,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.2),
+              color: color.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: color.withOpacity(0.6), width: 2),
+              border: Border.all(color: color.withValues(alpha: 0.6), width: 2),
             ),
             child: Center(
                 child: Text(emoji, style: const TextStyle(fontSize: 28))),
@@ -236,6 +224,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         GotchiMood.sleeping => const Color(0xFF020208),
         GotchiMood.excited  => const Color(0xFF1A1800),
         GotchiMood.dizzy    => const Color(0xFF0D0018),
+        GotchiMood.startled => const Color(0xFF2A1000),
+        GotchiMood.annoyed  => const Color(0xFF1A0C00),
         _                   => const Color(0xFF0A1A12),
       };
 }

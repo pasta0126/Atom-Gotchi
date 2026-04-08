@@ -1,5 +1,3 @@
-<!-- Añadir estos permisos al AndroidManifest generado por `flutter create` -->
-<!-- Dentro de <manifest> pero FUERA de <application> -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- BLE (API >= 31 = Android 12+) -->
@@ -19,7 +17,27 @@
 
     <application
         android:label="AtomGotchi"
+        android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
-        <!-- Resto de la configuración de Flutter aquí -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
     </application>
 </manifest>

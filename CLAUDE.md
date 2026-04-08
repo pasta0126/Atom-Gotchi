@@ -84,5 +84,5 @@ Device name: `AtomGotchi`
 - **Display:** GC9107, 128×128, accedido via `M5.Display` (M5GFX)
 - **IMU:** BMI270 6-axis, accedido via `M5.Imu.getAccel()` / `getGyro()`
 - **Micrófono:** PDM (DATA=GPIO6, CLK=GPIO5), accedido via `M5.Mic.record()`
-- **LED RGB:** 1× WS2812B, accedido via `M5.dis.drawpix(0, color)` + `M5.dis.show()`
+- **LED RGB:** 1× WS2812B, accedido via `M5.Leds.setPixelColor(0, color)` + `M5.Leds.show()`
 - **Botón:** `M5.BtnA.wasPressed()`

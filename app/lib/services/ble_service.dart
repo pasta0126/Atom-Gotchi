@@ -6,9 +6,9 @@ import '../models/gotchi_state.dart';
 
 class BleService extends ChangeNotifier {
   BluetoothDevice? _device;
-  BluetoothCharacteristic? _stateChar;
   BluetoothCharacteristic? _cmdChar;
   BluetoothCharacteristic? _phoneChar;
+  BluetoothCharacteristic? _contextChar;
 
   GotchiState _gotchiState = const GotchiState();
   bool _connected = false;
@@ -28,12 +28,20 @@ class BleService extends ChangeNotifier {
 
   Future<void> startScan() async {
     if (_scanning) return;
+
+    final adapterState = await FlutterBluePlus.adapterState.first;
+    if (adapterState != BluetoothAdapterState.on) {
+      _statusMsg = 'Bluetooth apagado';
+      notifyListeners();
+      return;
+    }
+
     _scanning  = true;
     _statusMsg = 'Buscando AtomGotchi…';
     notifyListeners();
 
     await FlutterBluePlus.startScan(
-      withName: BleConstants.deviceName,
+      withNames: [BleConstants.deviceName],
       timeout: const Duration(seconds: 15),
     );
 
@@ -98,13 +106,14 @@ class BleService extends ChangeNotifier {
         for (final c in s.characteristics) {
           final uuid = c.uuid.toString().toLowerCase();
           if (uuid == BleConstants.stateCharUuid) {
-            _stateChar = c;
             await c.setNotifyValue(true);
             _stateSub = c.onValueReceived.listen(_onStateReceived);
           } else if (uuid == BleConstants.cmdCharUuid) {
             _cmdChar = c;
           } else if (uuid == BleConstants.phoneCharUuid) {
             _phoneChar = c;
+          } else if (uuid == BleConstants.contextCharUuid) {
+            _contextChar = c;
           }
         }
       }
@@ -119,12 +128,12 @@ class BleService extends ChangeNotifier {
   void _onDisconnected() {
     _connected  = false;
     _statusMsg  = 'Desconectado';
-    _stateChar  = null;
-    _cmdChar    = null;
-    _phoneChar  = null;
+    _cmdChar     = null;
+    _phoneChar   = null;
+    _contextChar = null;
     _stateSub?.cancel();
     _connSub?.cancel();
-    _gotchiState = GotchiState(mood: GotchiMood.scared);
+    _gotchiState = const GotchiState(mood: GotchiMood.scared);
     notifyListeners();
   }
 
@@ -141,6 +150,16 @@ class BleService extends ChangeNotifier {
     if (_phoneChar == null) return;
     try {
       await _phoneChar!.write([level, charging ? 0x01 : 0x00], withoutResponse: true);
+    } catch (_) {}
+  }
+
+  /// Envía hora local + temperatura al Gotchi.
+  /// [tempC] es int8 (puede ser negativo); se envía como byte sin signo y el firmware lo reinterpreta.
+  Future<void> sendContext({required int hour, required int tempC}) async {
+    if (_contextChar == null) return;
+    try {
+      final temp = tempC.clamp(-40, 85) & 0xFF; // int8 → uint8 para BLE
+      await _contextChar!.write([hour & 0xFF, temp], withoutResponse: true);
     } catch (_) {}
   }
 

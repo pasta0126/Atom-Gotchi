@@ -5,6 +5,7 @@ class BleConstants {
   static const String stateCharUuid      = 'beb5483e-36e1-4688-b7f5-ea07361b2601';
   static const String cmdCharUuid        = 'beb5483e-36e1-4688-b7f5-ea07361b2602';
   static const String phoneCharUuid      = 'beb5483e-36e1-4688-b7f5-ea07361b2603';
+  static const String contextCharUuid   = 'beb5483e-36e1-4688-b7f5-ea07361b2604';
 
   // Comandos → dispositivo
   static const int cmdFeed  = 0x01;

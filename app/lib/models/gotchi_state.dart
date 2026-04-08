@@ -10,6 +10,8 @@ enum GotchiMood {
   angry,
   sad,
   sleeping,
+  startled,
+  annoyed,
 }
 
 extension GotchiMoodExtension on GotchiMood {
@@ -26,6 +28,8 @@ extension GotchiMoodExtension on GotchiMood {
       case GotchiMood.angry:    return '😠';
       case GotchiMood.sad:      return '😢';
       case GotchiMood.sleeping: return '💤';
+      case GotchiMood.startled: return '😨';
+      case GotchiMood.annoyed:  return '😤';
     }
   }
 
@@ -42,6 +46,8 @@ extension GotchiMoodExtension on GotchiMood {
       case GotchiMood.angry:    return '¡Enfadado!';
       case GotchiMood.sad:      return 'Triste';
       case GotchiMood.sleeping: return 'Durmiendo';
+      case GotchiMood.startled: return '¡Sobresaltado!';
+      case GotchiMood.annoyed:  return 'Contrariado';
     }
   }
 }
@@ -63,7 +69,6 @@ class GotchiState {
     this.phoneBatteryWarn = false,
   });
 
-  /// Parsear el payload BLE de 7 bytes
   factory GotchiState.fromBytes(List<int> bytes) {
     if (bytes.length < 6) return const GotchiState();
     final moodIndex = bytes[0].clamp(0, GotchiMood.values.length - 1);

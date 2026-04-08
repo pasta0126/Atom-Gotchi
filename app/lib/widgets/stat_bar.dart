@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
 
 class StatBar extends StatelessWidget {
-  final String label;
   final String icon;
   final int value; // 0-100
   final Color color;
 
   const StatBar({
     super.key,
-    required this.label,
     required this.icon,
     required this.value,
     required this.color,
@@ -24,18 +22,7 @@ class StatBar extends StatelessWidget {
       child: Row(
         children: [
           Text(icon, style: const TextStyle(fontSize: 18)),
-          const SizedBox(width: 6),
-          SizedBox(
-            width: 52,
-            child: Text(
-              label,
-              style: TextStyle(
-                color: isLow ? Colors.redAccent : Colors.white70,
-                fontSize: 12,
-                fontWeight: isLow ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-          ),
+          const SizedBox(width: 8),
           Expanded(
             child: ClipRRect(
               borderRadius: BorderRadius.circular(6),
@@ -46,18 +33,6 @@ class StatBar extends StatelessWidget {
                 valueColor: AlwaysStoppedAnimation<Color>(
                   isLow ? Colors.redAccent : color,
                 ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 32,
-            child: Text(
-              '$value',
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                color: isLow ? Colors.redAccent : Colors.white60,
-                fontSize: 12,
               ),
             ),
           ),

@@ -6,7 +6,8 @@
 #define GOTCHI_SERVICE_UUID     "4fafc201-1fb5-459e-8fcc-c5c9c3319100"
 #define GOTCHI_STATE_CHAR_UUID  "beb5483e-36e1-4688-b7f5-ea07361b2601"
 #define GOTCHI_CMD_CHAR_UUID    "beb5483e-36e1-4688-b7f5-ea07361b2602"
-#define GOTCHI_PHONE_CHAR_UUID  "beb5483e-36e1-4688-b7f5-ea07361b2603"
+#define GOTCHI_PHONE_CHAR_UUID    "beb5483e-36e1-4688-b7f5-ea07361b2603"
+#define GOTCHI_CONTEXT_CHAR_UUID  "beb5483e-36e1-4688-b7f5-ea07361b2604"
 #define GOTCHI_DEVICE_NAME      "AtomGotchi"
 
 // ─── Comandos app → dispositivo ──────────────────────────────────────────────
@@ -43,4 +44,5 @@ private:
     NimBLECharacteristic* _pStateChar;
     NimBLECharacteristic* _pCmdChar;
     NimBLECharacteristic* _pPhoneChar;
+    NimBLECharacteristic* _pContextChar;
 };

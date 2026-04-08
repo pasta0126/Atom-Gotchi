@@ -21,7 +21,7 @@ void setup() {
     cfg.internal_spk   = false;
     M5.begin(cfg);
 
-    display.begin();
+    display.begin();   // Avatar arranca su propia tarea FreeRTOS
     sensors.begin();
     ble.begin();
 
@@ -29,12 +29,23 @@ void setup() {
 }
 
 void loop() {
-    M5.update(); // actualiza botones, IMU, etc.
+    M5.update();
 
     sensors.update();
     state.update();
 
-    // Notificar por BLE si hubo cambio de estado o por intervalo
+    // Leer IMU crudo para la animación del display
+    float ax, ay, az;
+    M5.Imu.getAccel(&ax, &ay, &az);
+
+    // Leer micrófono RMS (reutilizamos el mismo buffer de GotchiSensors
+    // pero tomamos el último valor conocido — el display lo usa solo
+    // para animación, no para lógica de estado)
+    // Pasamos ax/ay directamente; el display escala internamente.
+    GotchiStats stats = state.getStats();
+    display.update(stats, ax, ay, sensors.lastMicRms());
+
+    // Notificar por BLE si hubo cambio o por intervalo
     unsigned long now = millis();
     bool notify = state.isMoodChanged() || (now - lastBLENotify >= BLE_NOTIFY_INTERVAL_MS);
     if (notify && ble.isConnected()) {
@@ -43,8 +54,5 @@ void loop() {
     }
     state.clearMoodChanged();
 
-    // Actualizar pantalla
-    display.update(state.getStats());
-
-    delay(20); // ~50 Hz main loop
+    delay(20); // ~50 Hz
 }

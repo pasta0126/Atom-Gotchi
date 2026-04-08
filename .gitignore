@@ -1,48 +1,35 @@
-# ── VS Code ──────────────────────────────────────────────────────────────────
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
-!.vscode/launch.json
-!.vscode/tasks.json
-*.code-workspace
+# ── PlatformIO ────────────────────────────────────────────────────────────────
+.pio/
+.pioenvs/
+.piolibdeps/
 
-# ── PlatformIO (firmware) ─────────────────────────────────────────────────────
-firmware/.pio/
-firmware/.pioenvs/
-firmware/.piolibdeps/
-
-# ── Flutter / Dart (app) ──────────────────────────────────────────────────────
+# ── Flutter / Dart ────────────────────────────────────────────────────────────
 app/.dart_tool/
 app/.flutter-plugins
 app/.flutter-plugins-dependencies
-app/.packages
 app/build/
-app/android/.gradle/
-app/android/app/build/
-app/android/local.properties
-app/android/key.properties
-app/ios/Pods/
-app/ios/.symlinks/
-app/ios/Flutter/Flutter.framework
-app/ios/Flutter/Flutter.podspec
-app/macos/Pods/
-app/linux/flutter/ephemeral/
-app/windows/flutter/ephemeral/
-app/web/
-*.g.dart
-*.freezed.dart
+app/.packages
 
-# ── Android keystore / signing ────────────────────────────────────────────────
-*.jks
-*.keystore
-app/android/app/google-services.json
+# Plataformas no objetivo (solo Android)
+app/ios/
+app/linux/
+app/macos/
+app/windows/
 
-# ── OS ────────────────────────────────────────────────────────────────────────
+# ── Editor / IDE ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.iml
+
+# ── Claude Code ───────────────────────────────────────────────────────────────
+.claude/
+
+# ── Sistema operativo ─────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# ── Logs & temporales ─────────────────────────────────────────────────────────
+# ── Varios ────────────────────────────────────────────────────────────────────
 *.log
-*.tmp
-*.bak
+*.pyc
+__pycache__/
