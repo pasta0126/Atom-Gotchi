@@ -4,7 +4,7 @@
 GotchiState::GotchiState()
     : _mood(Mood::HAPPY), _moodChanged(true),
       _hunger(80), _thirst(80), _energy(90), _steps(0),
-      _btConnected(false), _phoneBatteryWarn(false),
+      _phoneBatteryWarn(false),
       _hour(12), _tempC(20),
       _isDizzy(false), _isExcited(false), _isLaughing(false),
       _isAngry(false), _isStartled(false), _isAnnoyed(false),
@@ -243,20 +243,6 @@ void GotchiState::onButtonClick() {
     _recalcMood();
 }
 
-void GotchiState::onBTConnect() {
-    if (!_btConnected) {
-        _btConnected = true;
-        _recalcMood();
-    }
-}
-
-void GotchiState::onBTDisconnect() {
-    _btConnected = false;
-    _isExcited   = false;
-    _isLaughing  = false;
-    _recalcMood();
-}
-
 void GotchiState::onPhoneBattery(uint8_t level, bool /*charging*/) {
     bool warn = (level < 20);
     if (warn != _phoneBatteryWarn) {
@@ -279,9 +265,7 @@ void GotchiState::_recalcMood() {
     // Prioridad: SCARED → STARTLED → ANGRY → ANNOYED → DIZZY
     //          → LAUGHING → EXCITED → SLEEPING → TIRED → HUNGRY → THIRSTY → SAD → HAPPY
 
-    if (!_btConnected) {
-        newMood = Mood::SCARED;
-    } else if (_isStartled) {
+    if (_isStartled) {
         newMood = Mood::STARTLED;
     } else if (_isAngry) {
         newMood = Mood::ANGRY;

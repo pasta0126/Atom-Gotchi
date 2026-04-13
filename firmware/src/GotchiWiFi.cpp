@@ -50,9 +50,7 @@ void GotchiWiFi::_startConnect() {
 }
 
 void GotchiWiFi::_pollCommand() {
-    WiFiClientSecure client;
-    client.setInsecure();   // Acepta cualquier cert — válido para proyecto maker
-
+    WiFiClient client;
     HTTPClient http;
     String url = String(API_URL) + "/api/command/next";
     if (!http.begin(client, url)) return;
@@ -83,9 +81,7 @@ void GotchiWiFi::_pushState() {
                  + ",\"flags\":"  + String(s.phoneBatteryWarn ? 1 : 0)
                  + "}";
 
-    WiFiClientSecure client;
-    client.setInsecure();
-
+    WiFiClient client;
     HTTPClient http;
     String url = String(API_URL) + "/api/state";
     if (!http.begin(client, url)) return;

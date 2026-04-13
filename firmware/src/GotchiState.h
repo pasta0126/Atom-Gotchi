@@ -49,8 +49,6 @@ public:
     void onFaceUp5min();                   // boca arriba 5min → tender a dormir
     void onInactivity5min();               // sin movimiento 5min → tender a dormir
     void onButtonClick();                  // botón: petting 1-5 ok, >5 agobio
-    void onBTConnect();
-    void onBTDisconnect();
     void onPhoneBattery(uint8_t level, bool charging);
     void onContext(uint8_t hour, int8_t tempC);  // hora + temperatura desde teléfono
 
@@ -69,7 +67,6 @@ private:
     uint8_t  _energy;
     uint16_t _steps;
 
-    bool _btConnected;
     bool _phoneBatteryWarn;
     uint8_t  _hour;       // 0-23, enviado desde teléfono (default 12)
     int8_t   _tempC;      // temperatura ambiente en °C (default 20)

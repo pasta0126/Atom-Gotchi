@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AtomGotchi</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d0d0d;
+      color: #fff;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+
+    .device {
+      background: #1a1a1a;
+      border-radius: 2rem;
+      padding: 1.5rem;
+      width: 320px;
+      border: 2px solid #2a2a2a;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+    }
+
+    /* ── Status bar ── */
+    .status-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+      font-size: 0.72rem;
+      color: #555;
+    }
+    .status-left { display: flex; align-items: center; gap: 6px; }
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #333;
+      transition: background 0.4s;
+    }
+    .dot.online { background: #22c55e; box-shadow: 0 0 6px #22c55e88; }
+
+    /* ── Screen ── */
+    .screen {
+      background: #000;
+      border-radius: 1.2rem;
+      aspect-ratio: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.6rem;
+      border: 3px solid #1e1e1e;
+      margin-bottom: 1.5rem;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.4s;
+    }
+
+    .face {
+      font-family: 'Courier New', Courier, monospace;
+      text-align: center;
+      line-height: 1.1;
+      user-select: none;
+    }
+    .face .eyes  { display: block; font-size: 2.6rem; letter-spacing: 0.3em; }
+    .face .mouth { display: block; font-size: 1.8rem; margin-top: 0.2rem; }
+
+    .mood-badge {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      padding: 0.25rem 0.75rem;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.07);
+      color: var(--accent, #fff);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .zzz {
+      position: absolute;
+      top: 14px; right: 16px;
+      font-size: 0.85rem;
+      color: #6366f1;
+      animation: floatUp 2.4s ease-in-out infinite;
+      pointer-events: none;
+    }
+    @keyframes floatUp {
+      0%   { transform: translateY(0)   scale(1);    opacity: 0.5; }
+      50%  { transform: translateY(-8px) scale(1.15); opacity: 1; }
+      100% { transform: translateY(0)   scale(1);    opacity: 0.5; }
+    }
+
+    /* ── Stats ── */
+    .stats {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      margin-bottom: 1.4rem;
+    }
+    .stat {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    .stat-icon { font-size: 1rem; width: 1.4rem; text-align: center; flex-shrink: 0; }
+    .bar-track {
+      flex: 1;
+      background: #252525;
+      border-radius: 999px;
+      height: 8px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      transition: width 0.6s ease;
+    }
+    .bar-fill.hunger { background: linear-gradient(90deg, #ea580c, #fb923c); }
+    .bar-fill.thirst { background: linear-gradient(90deg, #2563eb, #60a5fa); }
+    .bar-fill.energy { background: linear-gradient(90deg, #16a34a, #4ade80); }
+    .stat-val {
+      font-size: 0.7rem;
+      color: #555;
+      width: 2.2rem;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    /* ── Actions ── */
+    .actions {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.6rem;
+    }
+    .btn {
+      background: #242424;
+      border: 1px solid #333;
+      color: #ccc;
+      border-radius: 1rem;
+      padding: 0.75rem 0.4rem;
+      cursor: pointer;
+      font-size: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.25rem;
+      transition: background 0.15s, transform 0.1s, color 0.15s;
+    }
+    .btn:hover:not(:disabled) { background: #2e2e2e; color: #fff; }
+    .btn:active:not(:disabled) { transform: scale(0.93); }
+    .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .btn-icon { font-size: 1.4rem; }
+
+    /* ── Feedback ── */
+    .feedback {
+      text-align: center;
+      font-size: 0.72rem;
+      color: #444;
+      margin-top: 0.9rem;
+      min-height: 1rem;
+      transition: color 0.2s;
+    }
+    .feedback.ok  { color: #22c55e; }
+    .feedback.err { color: #ef4444; }
+  </style>
+</head>
+<body>
+<div class="device">
+
+  <div class="status-bar">
+    <div class="status-left">
+      <div class="dot" id="dot"></div>
+      <span id="statusTxt">Sin conexión</span>
+    </div>
+    <span id="lastSeen">—</span>
+  </div>
+
+  <div class="screen" id="screen">
+    <div class="face">
+      <span class="eyes"  id="eyes">· ·</span>
+      <span class="mouth" id="mouth">‿</span>
+    </div>
+    <div class="mood-badge" id="badge">—</div>
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <span class="stat-icon">🍔</span>
+      <div class="bar-track"><div class="bar-fill hunger" id="bHunger" style="width:80%"></div></div>
+      <span class="stat-val" id="vHunger">80</span>
+    </div>
+    <div class="stat">
+      <span class="stat-icon">💧</span>
+      <div class="bar-track"><div class="bar-fill thirst" id="bThirst" style="width:80%"></div></div>
+      <span class="stat-val" id="vThirst">80</span>
+    </div>
+    <div class="stat">
+      <span class="stat-icon">⚡</span>
+      <div class="bar-track"><div class="bar-fill energy" id="bEnergy" style="width:90%"></div></div>
+      <span class="stat-val" id="vEnergy">90</span>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn" id="btnFeed"  onclick="send('feed')">
+      <span class="btn-icon">🍔</span>Feed
+    </button>
+    <button class="btn" id="btnDrink" onclick="send('drink')">
+      <span class="btn-icon">💧</span>Drink
+    </button>
+    <button class="btn" id="btnPet"   onclick="send('pet')">
+      <span class="btn-icon">🤗</span>Pet
+    </button>
+  </div>
+
+  <div class="feedback" id="feedback"></div>
+</div>
+
+<script>
+  // índice = valor de Mood en el firmware
+  const MOODS = [
+    { name:'HAPPY',    eyes:'◕  ◕', mouth:'‿',  accent:'#22c55e' }, // 0
+    { name:'TIRED',    eyes:'─  ─', mouth:'‿',  accent:'#64748b' }, // 1
+    { name:'HUNGRY',   eyes:'◕  ◕', mouth:'ω',  accent:'#f97316' }, // 2
+    { name:'THIRSTY',  eyes:'ó  ó', mouth:'A',  accent:'#3b82f6' }, // 3
+    { name:'DIZZY',    eyes:'@  @', mouth:'~',  accent:'#a855f7' }, // 4
+    { name:'EXCITED',  eyes:'★  ★', mouth:'D',  accent:'#eab308' }, // 5
+    { name:'SCARED',   eyes:'O  O', mouth:'A',  accent:'#ef4444' }, // 6
+    { name:'LAUGHING', eyes:'^  ^', mouth:'D',  accent:'#22c55e' }, // 7
+    { name:'ANGRY',    eyes:'>  <', mouth:'∧',  accent:'#ef4444' }, // 8
+    { name:'SAD',      eyes:';  ;', mouth:'⌢',  accent:'#6366f1' }, // 9
+    { name:'SLEEPING', eyes:'─  ─', mouth:'‿',  accent:'#4f46e5' }, // 10
+    { name:'STARTLED', eyes:'O  O', mouth:'o',  accent:'#ef4444' }, // 11
+    { name:'ANNOYED',  eyes:'=  =', mouth:'¬',  accent:'#f97316' }, // 12
+  ];
+
+  let prevMood = -1;
+  let fbTimer  = null;
+
+  function applyState(s) {
+    const m = MOODS[s.mood] ?? MOODS[0];
+
+    document.getElementById('eyes').textContent  = m.eyes;
+    document.getElementById('mouth').textContent = m.mouth;
+    document.getElementById('badge').textContent = m.name;
+    document.getElementById('badge').style.color = m.accent;
+    document.documentElement.style.setProperty('--accent', m.accent);
+
+    // Flash de borde al cambiar de mood
+    if (s.mood !== prevMood) {
+      const scr = document.getElementById('screen');
+      scr.style.borderColor = m.accent;
+      setTimeout(() => { scr.style.borderColor = ''; }, 500);
+
+      // Zzz solo mientras duerme
+      let zzz = document.querySelector('.zzz');
+      if (s.mood === 10) {
+        if (!zzz) {
+          zzz = document.createElement('div');
+          zzz.className = 'zzz';
+          zzz.textContent = 'Zzz';
+          document.getElementById('screen').appendChild(zzz);
+        }
+      } else if (zzz) {
+        zzz.remove();
+      }
+      prevMood = s.mood;
+    }
+
+    setStat('bHunger', 'vHunger', s.hunger);
+    setStat('bThirst', 'vThirst', s.thirst);
+    setStat('bEnergy', 'vEnergy', s.energy);
+  }
+
+  function setStat(barId, valId, v) {
+    document.getElementById(barId).style.width = v + '%';
+    document.getElementById(valId).textContent = v;
+  }
+
+  function setOnline(online, updatedAt) {
+    document.getElementById('dot').className = 'dot' + (online ? ' online' : '');
+    document.getElementById('statusTxt').textContent = online ? 'En línea' : 'Sin conexión';
+    document.getElementById('lastSeen').textContent =
+      updatedAt ? new Date(updatedAt).toLocaleTimeString() : '—';
+  }
+
+  function feedback(msg, ok) {
+    const el = document.getElementById('feedback');
+    el.textContent = msg;
+    el.className = 'feedback ' + (ok ? 'ok' : 'err');
+    clearTimeout(fbTimer);
+    fbTimer = setTimeout(() => { el.textContent = ''; el.className = 'feedback'; }, 2500);
+  }
+
+  async function poll() {
+    try {
+      const res = await fetch('/api/state/current');
+      if (res.status === 204) { setOnline(false, null); return; }
+      const s = await res.json();
+      const ageMs = Date.now() - new Date(s.updatedAt).getTime();
+      setOnline(ageMs < 12000, s.updatedAt); // offline si no recibió nada en 12 s (4 polls)
+      applyState(s);
+    } catch {
+      setOnline(false, null);
+    }
+  }
+
+  async function send(cmd) {
+    const btns = document.querySelectorAll('.btn');
+    btns.forEach(b => b.disabled = true);
+    try {
+      const res = await fetch('/api/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: cmd }),
+      });
+      feedback(res.ok ? `✓ ${cmd}` : '✗ error', res.ok);
+    } catch {
+      feedback('✗ sin red', false);
+    } finally {
+      btns.forEach(b => b.disabled = false);
+    }
+  }
+
+  poll();
+  setInterval(poll, 3000);
+</script>
+</body>
+</html>
