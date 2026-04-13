@@ -30,6 +30,12 @@ app/web/
 Thumbs.db
 desktop.ini
 
+# ── Firmware — credenciales sensibles ────────────────────────────────────────
+firmware/src/credentials.h
+
+# ── Docker — datos persistentes ──────────────────────────────────────────────
+api/data/
+
 # ── Varios ────────────────────────────────────────────────────────────────────
 *.log
 *.pyc

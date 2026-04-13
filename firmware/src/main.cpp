@@ -3,11 +3,13 @@
 #include "GotchiDisplay.h"
 #include "GotchiBLE.h"
 #include "GotchiSensors.h"
+#include "GotchiWiFi.h"
 
 GotchiState   state;
 GotchiDisplay display;
 GotchiBLE     ble(state);
 GotchiSensors sensors(state);
+GotchiWiFi    wifi(state);
 
 unsigned long lastBLENotify = 0;
 static constexpr unsigned long BLE_NOTIFY_INTERVAL_MS = 3000;
@@ -24,6 +26,7 @@ void setup() {
     display.begin();   // Avatar arranca su propia tarea FreeRTOS
     sensors.begin();
     ble.begin();
+    wifi.begin();
 
     Serial.println("[AtomGotchi] Listo!");
 }
@@ -33,6 +36,7 @@ void loop() {
 
     sensors.update();
     state.update();
+    wifi.update();
 
     // Leer IMU crudo para la animación del display
     float ax, ay, az;

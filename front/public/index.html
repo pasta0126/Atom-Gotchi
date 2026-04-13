@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AtomGotchi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Variables ─────────────────────────────────────────────────────────── */
+    :root {
+      --surface:          #0e0e13;
+      --surface-low:      #131319;
+      --surface-mid:      #19191f;
+      --surface-high:     #1f1f26;
+      --surface-highest:  #25252d;
+      --on-surface:       #f9f5fd;
+      --on-surface-dim:   #acaab1;
+      --primary:          #99f7ff;
+      --secondary:        #ff6b98;
+      --tertiary:         #8eff71;
+      --outline:          #48474d;
+      --font-head:        'Space Grotesk', sans-serif;
+      --font-body:        'Plus Jakarta Sans', sans-serif;
+      --radius-pill:      9999px;
+      --radius-card:      1.25rem;
+    }
+
+    /* ── Reset ─────────────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      background: var(--surface);
+      color: var(--on-surface);
+      font-family: var(--font-body);
+      overflow-x: hidden;
+    }
+
+    /* ── Particles canvas ──────────────────────────────────────────────────── */
+    #particles {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── App shell ─────────────────────────────────────────────────────────── */
+    .app {
+      position: relative;
+      z-index: 1;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* ── Header ────────────────────────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.25rem 0 1rem;
+      border-bottom: 1px solid var(--outline);
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-family: var(--font-head);
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .logo-text { color: var(--primary); text-shadow: 0 0 20px #99f7ff66; }
+    .live-pill {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      background: var(--surface-high);
+      border-radius: var(--radius-pill);
+      padding: 0.2rem 0.65rem;
+      font-size: 0.65rem;
+      font-family: var(--font-head);
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      color: var(--on-surface-dim);
+    }
+    .live-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #555;
+      transition: background 0.4s, box-shadow 0.4s;
+    }
+    .live-dot.online {
+      background: var(--tertiary);
+      box-shadow: 0 0 8px var(--tertiary);
+      animation: pulse-dot 2s infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.5; }
+    }
+    .nav-tabs {
+      display: flex;
+      gap: 0.25rem;
+    }
+    .tab {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-family: var(--font-head);
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      color: var(--on-surface-dim);
+      padding: 0.4rem 0.9rem;
+      border-radius: var(--radius-pill);
+      transition: color 0.2s, background 0.2s;
+    }
+    .tab.active {
+      color: var(--on-surface);
+      background: var(--surface-highest);
+    }
+    .tab:not(.active):hover { color: var(--on-surface); }
+    .tab:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    /* ── Main grid ─────────────────────────────────────────────────────────── */
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 220px 1fr 280px;
+      grid-template-rows: 1fr;
+      gap: 1.5rem;
+      padding: 1.5rem 0 2rem;
+      align-items: start;
+    }
+
+    /* ── Glass card ────────────────────────────────────────────────────────── */
+    .glass {
+      background: rgba(25, 25, 31, 0.7);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border-radius: var(--radius-card);
+      border: 1px solid rgba(72, 71, 77, 0.4);
+    }
+
+    /* ── L-bracket accent (manga style) ───────────────────────────────────── */
+    .glass::before {
+      content: '';
+      position: absolute;
+      top: 0.6rem; left: 0.6rem;
+      width: 14px; height: 14px;
+      border-top: 3px solid #ffd70066;
+      border-left: 3px solid #ffd70066;
+      border-radius: 2px 0 0 0;
+      pointer-events: none;
+    }
+    .glass { position: relative; overflow: hidden; }
+
+    /* ── Left info panel ───────────────────────────────────────────────────── */
+    .info-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .info-card {
+      padding: 1.25rem;
+    }
+    .info-card h4 {
+      font-family: var(--font-head);
+      font-size: 0.65rem;
+      letter-spacing: 0.12em;
+      color: var(--on-surface-dim);
+      margin-bottom: 1rem;
+    }
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.45rem 0;
+    }
+    .info-row + .info-row {
+      border-top: 1px solid rgba(72,71,77,0.3);
+    }
+    .info-label {
+      font-size: 0.7rem;
+      letter-spacing: 0.06em;
+      color: var(--on-surface-dim);
+      font-family: var(--font-head);
+    }
+    .info-value {
+      font-size: 0.78rem;
+      font-family: var(--font-head);
+      font-weight: 600;
+      color: var(--on-surface);
+      letter-spacing: 0.05em;
+    }
+    .queue-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 20px;
+      height: 20px;
+      border-radius: var(--radius-pill);
+      background: var(--surface-highest);
+      font-size: 0.7rem;
+      font-family: var(--font-head);
+      font-weight: 700;
+      color: var(--primary);
+      padding: 0 6px;
+    }
+
+    /* ── Center gotchi ─────────────────────────────────────────────────────── */
+    .gotchi-center {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1.25rem;
+    }
+
+    .face-wrapper {
+      position: relative;
+      width: 240px;
+      height: 240px;
+      border-radius: 50%;
+      transition: box-shadow 0.6s ease;
+      box-shadow: 0 0 80px 20px #ffd70033, 0 0 40px 8px #ffd70018;
+    }
+    .face-wrapper canvas {
+      display: block;
+      border-radius: 50%;
+      background: #000;
+    }
+
+    /* Pulse animation around the face */
+    .face-wrapper::after {
+      content: '';
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,215,0,0.2);
+      animation: face-ring 3s ease-in-out infinite;
+    }
+    @keyframes face-ring {
+      0%, 100% { transform: scale(1); opacity: 0.3; }
+      50%       { transform: scale(1.03); opacity: 0.7; }
+    }
+
+    /* Mood badge */
+    .mood-badge {
+      font-family: var(--font-head);
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      padding: 0.35rem 1.1rem;
+      border-radius: var(--radius-pill);
+      background: var(--surface-high);
+      border: 1px solid currentColor;
+      transition: color 0.5s, box-shadow 0.5s, border-color 0.5s;
+      color: #ffd700;
+      box-shadow: 0 0 12px currentColor;
+    }
+
+    /* Stats */
+    .stats {
+      width: 100%;
+      max-width: 340px;
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+      padding: 1.25rem;
+    }
+    .stat-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .stat-emoji { font-size: 1.1rem; flex-shrink: 0; }
+    .bar-track {
+      flex: 1;
+      height: 8px;
+      background: var(--surface-highest);
+      border-radius: var(--radius-pill);
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: var(--radius-pill);
+      transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+      width: 80%;
+    }
+    .bar-fill.hunger { background: linear-gradient(90deg, #ff8800, #ffcc44); box-shadow: 0 0 6px #ff880066; }
+    .bar-fill.thirst { background: linear-gradient(90deg, #0088ff, #44ccff); box-shadow: 0 0 6px #0088ff66; }
+    .bar-fill.energy { background: linear-gradient(90deg, #aacc00, #eeff44); box-shadow: 0 0 6px #aacc0066; }
+
+    /* Action buttons */
+    .actions {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .action-btn {
+      font-family: var(--font-head);
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      border: none;
+      border-radius: var(--radius-pill);
+      padding: 0.7rem 1.4rem;
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s, opacity 0.2s;
+      color: #000;
+    }
+    .action-btn:hover  { transform: translateY(-2px); filter: brightness(1.15); }
+    .action-btn:active { transform: scale(0.95); }
+    .action-btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+    .action-btn.pressed { animation: btn-pop 0.25s ease; }
+    @keyframes btn-pop {
+      0%   { transform: scale(0.93); }
+      60%  { transform: scale(1.06); }
+      100% { transform: scale(1); }
+    }
+    .btn-feed  { background: linear-gradient(135deg, #ff8800, #ffcc44); box-shadow: 0 4px 20px #ff880055; }
+    .btn-drink { background: linear-gradient(135deg, #0088ff, #44ccff); box-shadow: 0 4px 20px #0088ff55; }
+    .btn-pet   { background: linear-gradient(135deg, #ff44aa, #ff99cc); box-shadow: 0 4px 20px #ff44aa55; }
+
+    /* Steps footer */
+    .steps-footer {
+      font-family: var(--font-head);
+      font-size: 0.72rem;
+      letter-spacing: 0.06em;
+      color: var(--on-surface-dim);
+    }
+
+    /* ── Right feed panel ──────────────────────────────────────────────────── */
+    .feed-panel { position: sticky; top: 1.5rem; }
+    .feed-card { padding: 1.25rem; max-height: 70vh; display: flex; flex-direction: column; }
+    .feed-title {
+      font-family: var(--font-head);
+      font-size: 0.7rem;
+      letter-spacing: 0.1em;
+      color: var(--on-surface-dim);
+      margin-bottom: 1rem;
+    }
+    .feed-list {
+      overflow-y: auto;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 0.1rem;
+      scrollbar-width: thin;
+      scrollbar-color: var(--surface-highest) transparent;
+    }
+    .feed-item {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.55rem 0.5rem;
+      border-radius: 0.6rem;
+      transition: background 0.2s;
+      animation: slide-in 0.35s ease;
+    }
+    @keyframes slide-in {
+      from { opacity: 0; transform: translateX(12px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    .feed-item:hover { background: var(--surface-highest); }
+    .feed-flag { font-size: 1.1rem; flex-shrink: 0; }
+    .feed-text {
+      flex: 1;
+      font-size: 0.72rem;
+      color: var(--on-surface-dim);
+    }
+    .feed-text strong { color: var(--on-surface); font-weight: 600; }
+    .feed-time {
+      font-size: 0.62rem;
+      font-family: var(--font-head);
+      color: var(--outline);
+      flex-shrink: 0;
+    }
+
+    /* ── Toast ─────────────────────────────────────────────────────────────── */
+    .toast {
+      position: fixed;
+      bottom: 1.5rem;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--surface-highest);
+      border: 1px solid var(--outline);
+      color: var(--on-surface);
+      font-family: var(--font-head);
+      font-size: 0.78rem;
+      padding: 0.6rem 1.2rem;
+      border-radius: var(--radius-pill);
+      z-index: 100;
+      opacity: 0;
+      transition: transform 0.3s ease, opacity 0.3s ease;
+      pointer-events: none;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* ── Offline overlay ───────────────────────────────────────────────────── */
+    .offline-bar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      padding: 0.4rem;
+      background: #ff222244;
+      border-bottom: 1px solid #ff222288;
+      text-align: center;
+      font-family: var(--font-head);
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      color: #ffaaaa;
+      z-index: 50;
+      transform: translateY(-100%);
+      transition: transform 0.3s;
+    }
+    .offline-bar.show { transform: translateY(0); }
+
+    /* ── Responsive ────────────────────────────────────────────────────────── */
+    @media (max-width: 960px) {
+      main { grid-template-columns: 1fr; grid-template-rows: auto; }
+      .info-panel { display: none; }
+      .feed-panel { position: static; max-height: 300px; }
+      .feed-card { max-height: 300px; }
+    }
+    @media (max-width: 600px) {
+      .app { padding: 0 1rem; }
+      .logo { font-size: 1.1rem; }
+      .face-wrapper { width: 200px; height: 200px; }
+      .face-wrapper canvas { width: 200px; height: 200px; }
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="particles"></canvas>
+<div class="offline-bar" id="offline-bar">⚠ Gotchi offline — reconnecting…</div>
+
+<div class="app">
+  <!-- ── Header ── -->
+  <header>
+    <div class="logo">
+      <span class="logo-text">AtomGotchi</span>
+      <span class="live-pill">
+        <span class="live-dot" id="live-dot"></span>
+        <span id="live-label">OFFLINE</span>
+      </span>
+    </div>
+    <nav class="nav-tabs">
+      <button class="tab active">CORE</button>
+      <button class="tab" disabled>ARENA</button>
+      <button class="tab" disabled>LAB</button>
+      <button class="tab" disabled>ARCHIVE</button>
+    </nav>
+  </header>
+
+  <!-- ── Main ── -->
+  <main>
+
+    <!-- Left: info -->
+    <aside class="info-panel">
+      <div class="glass info-card">
+        <h4>UNIT STATUS</h4>
+        <div class="info-row">
+          <span class="info-label">ID</span>
+          <span class="info-value">ATOM-01</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">MOOD</span>
+          <span class="info-value" id="info-mood">—</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">STEPS</span>
+          <span class="info-value" id="info-steps">—</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">LAST UPDATE</span>
+          <span class="info-value" id="info-update">—</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Center: gotchi -->
+    <section class="gotchi-center">
+
+      <div class="face-wrapper" id="face-wrapper">
+        <canvas id="face" width="240" height="240"></canvas>
+      </div>
+
+      <div class="mood-badge" id="mood-badge">CONNECTING…</div>
+
+      <div class="glass stats">
+        <div class="stat-row">
+          <span class="stat-emoji">🍔</span>
+          <div class="bar-track"><div class="bar-fill hunger" id="bar-hunger" style="width:80%"></div></div>
+        </div>
+        <div class="stat-row">
+          <span class="stat-emoji">💧</span>
+          <div class="bar-track"><div class="bar-fill thirst" id="bar-thirst" style="width:80%"></div></div>
+        </div>
+        <div class="stat-row">
+          <span class="stat-emoji">⚡</span>
+          <div class="bar-track"><div class="bar-fill energy" id="bar-energy" style="width:80%"></div></div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="action-btn btn-feed"  id="btn-feed"  onclick="sendCommand('feed')">FEED 🍔</button>
+        <button class="action-btn btn-drink" id="btn-drink" onclick="sendCommand('drink')">DRINK 💧</button>
+        <button class="action-btn btn-pet"   id="btn-pet"   onclick="sendCommand('pet')">PET 🤝</button>
+      </div>
+
+      <div class="steps-footer">👟 <span id="steps-display">—</span> steps today</div>
+    </section>
+
+    <!-- Right: live feed -->
+    <aside class="feed-panel">
+      <div class="glass feed-card">
+        <div class="feed-title">🌍 LIVE ACTIONS</div>
+        <div class="feed-list" id="feed-list">
+          <div class="feed-item">
+            <span class="feed-flag">🌐</span>
+            <span class="feed-text">Waiting for interactions…</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const MOODS = {
+  0:  { name: 'HAPPY',     color: '#ffd700' },
+  1:  { name: 'TIRED',     color: '#9966cc' },
+  2:  { name: 'HUNGRY',    color: '#ff8800' },
+  3:  { name: 'THIRSTY',   color: '#00aaff' },
+  4:  { name: 'DIZZY',     color: '#ff44ff' },
+  5:  { name: 'EXCITED',   color: '#aaff00' },
+  6:  { name: 'SCARED',    color: '#ffffff' },
+  7:  { name: 'LAUGHING',  color: '#ffee44' },
+  8:  { name: 'ANGRY',     color: '#ff2200' },
+  9:  { name: 'SAD',       color: '#4488ff' },
+  10: { name: 'SLEEPING',  color: '#5566aa' },
+  11: { name: 'STARTLED',  color: '#ff6600' },
+  12: { name: 'ANNOYED',   color: '#cc3300' },
+};
+
+const ACTION_LABELS = {
+  feed:  '🍔 fed the gotchi',
+  drink: '💧 gave water',
+  pet:   '🤝 petted the gotchi',
+};
+
+// ── Particles ────────────────────────────────────────────────────────────────
+
+(function initParticles() {
+  const canvas = document.getElementById('particles');
+  const ctx    = canvas.getContext('2d');
+  let W, H, particles;
+
+  function resize() {
+    W = canvas.width  = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    particles = Array.from({ length: 70 }, () => ({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      r: Math.random() * 1.4 + 0.4,
+      vx: (Math.random() - 0.5) * 0.25,
+      vy: (Math.random() - 0.5) * 0.25,
+      a: Math.random() * 0.35 + 0.05,
+    }));
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  (function tick() {
+    ctx.clearRect(0, 0, W, H);
+    for (const p of particles) {
+      p.x += p.vx; p.y += p.vy;
+      if (p.x < 0)  p.x = W;
+      if (p.x > W)  p.x = 0;
+      if (p.y < 0)  p.y = H;
+      if (p.y > H)  p.y = 0;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(153,247,255,${p.a})`;
+      ctx.fill();
+    }
+    requestAnimationFrame(tick);
+  })();
+})();
+
+// ── Face drawing ─────────────────────────────────────────────────────────────
+
+const faceCanvas = document.getElementById('face');
+const faceCtx    = faceCanvas.getContext('2d');
+
+function drawFace(mood) {
+  const W = faceCanvas.width, H = faceCanvas.height;
+  faceCtx.clearRect(0, 0, W, H);
+
+  const cx = W / 2, cy = H / 2;
+  const R  = W * 0.46;   // face circle radius
+  const lw = W * 0.028;  // base line width
+  const eo = R * 0.36;   // eye horizontal offset from center
+  const ey = cy - R * 0.1; // eye y baseline
+
+  // Black circle
+  faceCtx.fillStyle = '#000';
+  faceCtx.beginPath();
+  faceCtx.arc(cx, cy, R, 0, Math.PI * 2);
+  faceCtx.fill();
+
+  faceCtx.strokeStyle = '#fff';
+  faceCtx.fillStyle   = '#fff';
+  faceCtx.lineWidth   = lw;
+  faceCtx.lineCap     = 'round';
+  faceCtx.lineJoin    = 'round';
+
+  switch (mood) {
+
+    case 0: // HAPPY — squint eyes + smile
+      for (const s of [-1, 1]) {
+        faceCtx.beginPath();
+        faceCtx.arc(cx + s * eo, ey, R * 0.13, Math.PI, 0);
+        faceCtx.stroke();
+      }
+      faceCtx.beginPath();
+      faceCtx.arc(cx, cy + R * 0.18, R * 0.22, 0.1, Math.PI - 0.1);
+      faceCtx.stroke();
+      break;
+
+    case 1: // TIRED — droopy half eyes + flat mouth
+      for (const s of [-1, 1]) {
+        faceCtx.beginPath();
+        faceCtx.ellipse(cx + s * eo, ey, R * 0.12, R * 0.06, 0, 0, Math.PI * 2);
+        faceCtx.fill();
+        // droopy lower lid
+        faceCtx.beginPath();
+        faceCtx.arc(cx + s * eo, ey + R * 0.04, R * 0.12, 0, Math.PI);
+        faceCtx.strokeStyle = '#000'; faceCtx.lineWidth = lw * 1.2;
+        faceCtx.stroke();
+        faceCtx.strokeStyle = '#fff'; faceCtx.lineWidth = lw;
+      }
+      faceCtx.beginPath();
+      faceCtx.moveTo(cx - R * 0.18, cy + R * 0.28);
+      faceCtx.lineTo(cx + R * 0.18, cy + R * 0.28);
+      faceCtx.stroke();
+      break;
+
+    case 2: // HUNGRY — round eyes + open oval mouth
+      for (const s of [-1, 1]) {
+        faceCtx.beginPath();
+        faceCtx.arc(cx + s * eo, ey, R * 0.12, 0, Math.PI * 2);
+        faceCtx.fill();
+      }
+      faceCtx.beginPath();
+      faceCtx.ellipse(cx, cy + R * 0.28, R * 0.14, R * 0.18, 0, 0, Math.PI * 2);
+      faceCtx.stroke();
+      break;
+
+    case 3: // THIRSTY — eyes + tongue out
+      for (const s of [-1, 1]) {
+        faceCtx.beginPath();
+        faceCtx.arc(cx + s * eo, ey, R * 0.11, 0, Math.PI * 2);
+        faceCtx.fill();
+      }
+      // open mouth
+      faceCtx.beginPath();
+      faceCtx.arc(cx, cy + R * 0.22, R * 0.16, 0, Math.PI);
+      faceCtx.stroke();
+      // tongue
+      faceCtx.fillStyle = '#ff6699';
+      faceCtx.beginPath();
+      faceCtx.ellipse(cx, cy + R * 0.42, R * 0.1, R * 0.12, 0, 0, Math.PI * 2);
+      faceCtx.fill();
+      faceCtx.fillStyle = '#fff';
+      break;
+
+    case 4: // DIZZY — X eyes + wavy mouth
+      for (const s of [-1, 1]) {
+        const ex = cx + s * eo;
+        const d  = R * 0.1;
+        faceCtx.lineWidth = lw * 1.2;
+        faceCtx.beginPath(); faceCtx.moveTo(ex - d, ey - d); faceCtx.lineTo(ex + d, ey + d); faceCtx.stroke();
+        faceCtx.beginPath(); faceCtx.moveTo(ex + d, ey - d); faceCtx.lineTo(ex - d, ey + d); faceCtx.stroke();
+        faceCtx.lineWidth = lw;
+      }
+      // wavy mouth
+      faceCtx.beginPath();
+      faceCtx.moveTo(cx - R * 0.22, cy + R * 0.28);
+      faceCtx.bezierCurveTo(cx - R * 0.1, cy + R * 0.18, cx + R * 0.1, cy + R * 0.38, cx + R * 0.22, cy + R * 0.28);
+      faceCtx.stroke();
+      break;
+
+    case 5: // EXCITED — star eyes + big grin
+      for (const s of [-1, 1]) {
+        drawStar(faceCtx, cx + s * eo, ey, R * 0.13, 6);
+      }
+      faceCtx.beginPath();
+      faceCtx.arc(cx, cy + R * 0.15, R * 0.25, 0.05, Math.PI - 0.05);
+      faceCtx.stroke();
+      // rosy cheeks
+      for (const s of [-1, 1]) {
+        faceCtx.fillStyle = 'rgba(255,150,150,0.25)';
+        faceCtx.beginPath();
+        faceCtx.ellipse(cx + s * R * 0.5, cy + R * 0.08, R * 0.12, R * 0.08, 0, 0, Math.PI * 2);
+        faceCtx.fill();
+      }
+      faceCtx.fillStyle = '#fff';
+      break;
+
+    case 6: // SCARED — huge eyes + open oval
+      for (const s of [-1, 1]) {
+        faceCtx.beginPath();
+        faceCtx.arc(cx + s * eo, ey, R * 0.18, 0, Math.PI * 2);
+        faceCtx.stroke();
+        // small pupil
+        faceCtx.beginPath();
+        faceCtx.arc(cx + s * eo, ey, R * 0.06, 0, Math.PI * 2);
+        faceCtx.fill();
+      }
+      faceCtx.beginPath();
+      faceCtx.ellipse(cx, cy + R * 0.3, R * 0.12, R * 0.17, 0, 0, Math.PI * 2);
+      faceCtx.stroke();
+      break;
+
+    case 7: // LAUGHING — squint up + wide open laugh
+      for (const s of [-1, 1]) {
+        faceCtx.beginPath();
+        faceCtx.arc(cx + s * eo, ey, R * 0.13, 0, Math.PI, true);
+        faceCtx.stroke();
+      }
+      faceCtx.beginPath();
+      faceCtx.arc(cx, cy + R * 0.15, R * 0.25, 0, Math.PI);
+      faceCtx.closePath();
+      faceCtx.fill();
+      faceCtx.strokeStyle = '#000'; faceCtx.lineWidth = 1;
+      // teeth
+      faceCtx.fillStyle = '#000';
+      faceCtx.fillRect(cx - R * 0.2, cy + R * 0.15, R * 0.4, R * 0.08);
+      faceCtx.fillStyle = '#fff'; faceCtx.strokeStyle = '#fff'; faceCtx.lineWidth = lw;
+      break;
+
+    case 8: // ANGRY — thick brows + small eyes + frown
+      faceCtx.lineWidth = lw * 1.6;
+      for (const s of [-1, 1]) {
+        faceCtx.beginPath();
+        faceCtx.moveTo(cx + s * (eo - R * 0.14), ey - R * 0.22);
+        faceCtx.lineTo(cx + s * (eo + R * 0.14), ey - R * 0.34);
+        faceCtx.stroke();
+      }
+      faceCtx.lineWidth = lw;
+      for (const s of [-1, 1]) {
+        faceCtx.beginPath();
+        faceCtx.ellipse(cx + s * eo, ey, R * 0.1, R * 0.07, 0, 0, Math.PI * 2);
+        faceCtx.fill();
+      }
+      faceCtx.beginPath();
+      faceCtx.arc(cx, cy + R * 0.48, R * 0.18, Math.PI + 0.3, -0.3);
+      faceCtx.stroke();
+      break;
+
+    case 9: // SAD — small eyes + tear + frown
+      for (const s of [-1, 1]) {
+        faceCtx.beginPath();
+        faceCtx.ellipse(cx + s * eo, ey, R * 0.09, R * 0.11, 0, 0, Math.PI * 2);
+        faceCtx.fill();
+      }
+      // teardrop
+      faceCtx.fillStyle = '#88bbff';
+      faceCtx.beginPath();
+      faceCtx.ellipse(cx - eo + R * 0.06, ey + R * 0.22, R * 0.04, R * 0.08, 0, 0, Math.PI * 2);
+      faceCtx.fill();
+      faceCtx.fillStyle = '#fff';
+      // frown
+      faceCtx.beginPath();
+      faceCtx.arc(cx, cy + R * 0.48, R * 0.2, Math.PI + 0.2, -0.2);
+      faceCtx.stroke();
+      break;
+
+    case 10: // SLEEPING — dash eyes + ZZZ
+      for (const s of [-1, 1]) {
+        faceCtx.beginPath();
+        faceCtx.moveTo(cx + s * (eo - R * 0.1), ey);
+        faceCtx.lineTo(cx + s * (eo + R * 0.1), ey);
+        faceCtx.stroke();
+      }
+      faceCtx.beginPath();
+      faceCtx.arc(cx, cy + R * 0.3, R * 0.1, 0.2, Math.PI - 0.2);
+      faceCtx.stroke();
+      // ZZZ
+      faceCtx.fillStyle = '#aabbff';
+      faceCtx.font = `bold ${R * 0.22}px var(--font-head, sans-serif)`;
+      faceCtx.textAlign = 'center';
+      faceCtx.fillText('zzz', cx + R * 0.45, cy - R * 0.3);
+      faceCtx.fillStyle = '#fff';
+      break;
+
+    case 11: // STARTLED — huge eyes with pupils + open rect mouth
+      for (const s of [-1, 1]) {
+        faceCtx.beginPath();
+        faceCtx.arc(cx + s * eo, ey, R * 0.2, 0, Math.PI * 2);
+        faceCtx.stroke();
+        faceCtx.beginPath();
+        faceCtx.arc(cx + s * (eo + R * 0.06), ey - R * 0.04, R * 0.07, 0, Math.PI * 2);
+        faceCtx.fill();
+      }
+      const mw = R * 0.22, mh = R * 0.2;
+      faceCtx.beginPath();
+      faceCtx.roundRect(cx - mw, cy + R * 0.18, mw * 2, mh, 4);
+      faceCtx.stroke();
+      break;
+
+    case 12: // ANNOYED — one eye half-closed + steam + flat mouth
+      // Left eye normal
+      faceCtx.beginPath();
+      faceCtx.arc(cx - eo, ey, R * 0.11, 0, Math.PI * 2);
+      faceCtx.fill();
+      // Right eye half-closed (squint)
+      faceCtx.beginPath();
+      faceCtx.arc(cx + eo, ey, R * 0.11, 0, Math.PI * 2);
+      faceCtx.fill();
+      faceCtx.fillStyle = '#000';
+      faceCtx.fillRect(cx + eo - R * 0.12, ey - R * 0.13, R * 0.24, R * 0.12);
+      faceCtx.fillStyle = '#fff';
+      // flat mouth
+      faceCtx.beginPath();
+      faceCtx.moveTo(cx - R * 0.18, cy + R * 0.3);
+      faceCtx.lineTo(cx + R * 0.18, cy + R * 0.3);
+      faceCtx.stroke();
+      // steam puff
+      faceCtx.strokeStyle = '#ff6600';
+      faceCtx.lineWidth = lw * 0.8;
+      for (let i = 0; i < 3; i++) {
+        faceCtx.beginPath();
+        faceCtx.arc(cx + R * 0.55 + i * R * 0.18, ey - R * 0.25 - i * R * 0.08, R * 0.06, 0, Math.PI * 2);
+        faceCtx.stroke();
+      }
+      faceCtx.strokeStyle = '#fff'; faceCtx.lineWidth = lw;
+      break;
+
+    default:
+      drawFace(0);
+  }
+}
+
+function drawStar(ctx, cx, cy, r, points) {
+  ctx.beginPath();
+  for (let i = 0; i < points * 2; i++) {
+    const a = (i * Math.PI) / points - Math.PI / 2;
+    const d = i % 2 === 0 ? r : r * 0.45;
+    i === 0 ? ctx.moveTo(cx + d * Math.cos(a), cy + d * Math.sin(a))
+            : ctx.lineTo(cx + d * Math.cos(a), cy + d * Math.sin(a));
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+// ── State update ─────────────────────────────────────────────────────────────
+
+let lastMood = -1;
+
+function updateUI(state) {
+  if (!state) return;
+
+  const mood = MOODS[state.mood] ?? MOODS[0];
+
+  // Face
+  if (state.mood !== lastMood) {
+    drawFace(state.mood);
+    lastMood = state.mood;
+  }
+
+  // Aura glow
+  const c = mood.color;
+  document.getElementById('face-wrapper').style.boxShadow =
+    `0 0 80px 18px ${c}30, 0 0 40px 8px ${c}18`;
+
+  // Ring accent color
+  const ringEl = document.getElementById('face-wrapper');
+  ringEl.style.setProperty('--ring-color', c + '44');
+
+  // Mood badge
+  const badge = document.getElementById('mood-badge');
+  badge.textContent = mood.name;
+  badge.style.color = c;
+  badge.style.borderColor = c + '66';
+  badge.style.boxShadow = `0 0 14px ${c}66`;
+
+  // Stats bars
+  document.getElementById('bar-hunger').style.width = state.hunger + '%';
+  document.getElementById('bar-thirst').style.width = state.thirst + '%';
+  document.getElementById('bar-energy').style.width = state.energy + '%';
+
+  // Steps
+  const steps = (state.steps ?? 0).toLocaleString();
+  document.getElementById('steps-display').textContent = steps;
+  document.getElementById('info-steps').textContent    = steps;
+  document.getElementById('info-mood').textContent     = mood.name;
+
+  // Last update
+  if (state.updated_at) {
+    const d = new Date(state.updated_at * 1000);
+    document.getElementById('info-update').textContent =
+      d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+}
+
+function updateFeed(items) {
+  if (!items || items.length === 0) return;
+  const list = document.getElementById('feed-list');
+
+  // Build from scratch if content is just the placeholder
+  const isPlaceholder = list.children.length === 1 &&
+    list.children[0].querySelector('.feed-text')?.textContent === 'Waiting for interactions…';
+
+  // Only prepend new items (compare with what's already in the list)
+  const existing = new Set(
+    [...list.querySelectorAll('.feed-item[data-ts]')].map(el => el.dataset.ts)
+  );
+
+  const newItems = items.filter(i => !existing.has(String(i.created_at)));
+  if (newItems.length === 0 && !isPlaceholder) return;
+
+  if (isPlaceholder) list.innerHTML = '';
+
+  for (const item of newItems) {
+    const el = document.createElement('div');
+    el.className = 'feed-item';
+    el.dataset.ts = item.created_at;
+    const ago = timeAgo(item.created_at);
+    el.innerHTML = `
+      <span class="feed-flag">${item.flag}</span>
+      <span class="feed-text">Someone <strong>${ACTION_LABELS[item.action] ?? item.action}</strong></span>
+      <span class="feed-time">${ago}</span>
+    `;
+    list.insertBefore(el, list.firstChild);
+  }
+
+  // Keep max 20 items in DOM
+  while (list.children.length > 20) list.removeChild(list.lastChild);
+}
+
+function timeAgo(unix) {
+  const s = Math.floor(Date.now() / 1000) - unix;
+  if (s < 10)  return 'now';
+  if (s < 60)  return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  return `${Math.floor(s / 3600)}h`;
+}
+
+// ── Connectivity ──────────────────────────────────────────────────────────────
+
+let isOnline = false;
+
+function setOnline(v) {
+  if (v === isOnline) return;
+  isOnline = v;
+  document.getElementById('live-dot').classList.toggle('online', v);
+  document.getElementById('live-label').textContent = v ? 'LIVE' : 'OFFLINE';
+  document.getElementById('offline-bar').classList.toggle('show', !v);
+}
+
+// ── Poll loop ─────────────────────────────────────────────────────────────────
+
+async function poll() {
+  try {
+    const [sr, fr] = await Promise.all([
+      fetch('/api/state'),
+      fetch('/api/feed'),
+    ]);
+    if (!sr.ok) throw new Error('state ' + sr.status);
+
+    const state = await sr.json();
+    const feed  = fr.ok ? await fr.json() : [];
+
+    // Only consider online if the state was updated recently (< 15s)
+    const fresh = state.updated_at && (Date.now() / 1000 - state.updated_at) < 15;
+    setOnline(fresh);
+
+    updateUI(state);
+    updateFeed(feed);
+  } catch (e) {
+    setOnline(false);
+  }
+  setTimeout(poll, 3000);
+}
+
+// ── Commands ──────────────────────────────────────────────────────────────────
+
+async function sendCommand(action) {
+  const btn = document.getElementById(`btn-${action}`);
+  btn.disabled = true;
+  btn.classList.add('pressed');
+  setTimeout(() => btn.classList.remove('pressed'), 250);
+
+  try {
+    const res = await fetch('/api/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    });
+    if (res.status === 429) {
+      showToast('⏳ Wait a moment before sending another command');
+      btn.disabled = false;
+      return;
+    }
+    if (!res.ok) {
+      showToast('❌ Something went wrong');
+      btn.disabled = false;
+      return;
+    }
+  } catch {
+    showToast('❌ Could not reach the server');
+    btn.disabled = false;
+    return;
+  }
+
+  // Re-enable after 5s (matches API rate limit window)
+  setTimeout(() => { btn.disabled = false; }, 5000);
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+
+let toastTimer;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+
+drawFace(0); // render initial HAPPY face immediately
+poll();      // start polling
+</script>
+</body>
+</html>
