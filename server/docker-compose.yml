@@ -1,8 +1,21 @@
 services:
   gotchi:
     build: .
+    platform: linux/arm64
     ports:
       - "5000:8080"
     restart: unless-stopped
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
+    networks:
+      - shared-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.gotchi.rule=Host(`atom.northernarchive.com`)"
+      - "traefik.http.routers.gotchi.entrypoints=websecure"
+      - "traefik.http.routers.gotchi.tls.certresolver=myresolver"
+      - "traefik.http.services.gotchi.loadbalancer.server.port=8080"
+
+networks:
+  shared-network:
+    external: true

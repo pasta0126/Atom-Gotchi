@@ -1,0 +1,71 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy on Mac Mini
+    runs-on: [self-hosted, ARM64]
+    timeout-minutes: 15
+
+    steps:
+      - name: Deploy
+        env:
+          DEPLOY_PATH: ${{ secrets.ATOM_DEPLOY_PATH }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          cd "$DEPLOY_PATH"
+          git fetch https://x-access-token:${GITHUB_TOKEN}@github.com/pasta0126/Atom-Gotchi.git main
+          git reset --hard FETCH_HEAD
+          docker compose -f server/docker-compose.yml up -d --build
+          docker image prune -f
+          echo "Deploy complete: $(date)"
+
+  notify:
+    needs: deploy
+    runs-on: [self-hosted, ARM64]
+    if: always()
+
+    steps:
+      - name: Slack notification
+        env:
+          DEPLOY: ${{ needs.deploy.result }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          python3 << 'PYEOF'
+          import urllib.request, json, os
+
+          deploy = os.environ['DEPLOY']
+          success = deploy == 'success'
+
+          icon = ':white_check_mark:' if success else ':x:'
+          color = 'good' if success else 'danger'
+          title = 'Deploy completado' if success else 'Deploy fallido'
+          commit = os.environ['COMMIT_SHA'][:7]
+
+          payload = {
+              'attachments': [{
+                  'color': color,
+                  'blocks': [
+                      {'type': 'section', 'text': {'type': 'mrkdwn', 'text': f"{icon} *{os.environ['REPO']}* — {title}"}},
+                      {'type': 'section', 'fields': [
+                          {'type': 'mrkdwn', 'text': f'*Deploy:* {deploy}'},
+                          {'type': 'mrkdwn', 'text': f'*Branch:* {os.environ["BRANCH"]}'},
+                          {'type': 'mrkdwn', 'text': f'*Commit:* {commit}'},
+                      ]},
+                      {'type': 'actions', 'elements': [{'type': 'button', 'text': {'type': 'plain_text', 'text': 'Ver run'}, 'url': os.environ['RUN_URL']}]}
+                  ]
+              }]
+          }
+
+          data = json.dumps(payload).encode()
+          req = urllib.request.Request(os.environ['WEBHOOK'], data, {'Content-Type': 'application/json'})
+          urllib.request.urlopen(req)
+          PYEOF
