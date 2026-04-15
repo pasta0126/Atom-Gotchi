@@ -50,7 +50,8 @@ void GotchiWiFi::_startConnect() {
 }
 
 void GotchiWiFi::_pollCommand() {
-    WiFiClient client;
+    WiFiClientSecure client;
+    client.setInsecure();
     HTTPClient http;
     String url = String(API_URL) + "/api/command/next";
     if (!http.begin(client, url)) return;
@@ -81,7 +82,8 @@ void GotchiWiFi::_pushState() {
                  + ",\"flags\":"  + String(s.phoneBatteryWarn ? 1 : 0)
                  + "}";
 
-    WiFiClient client;
+    WiFiClientSecure client;
+    client.setInsecure();
     HTTPClient http;
     String url = String(API_URL) + "/api/state";
     if (!http.begin(client, url)) return;
