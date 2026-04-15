@@ -18,10 +18,7 @@ public sealed class GotchiStore
     public void UpdateState(DeviceStateDto dto)
     {
         lock (_lock)
-            _state = new GotchiStateModel(
-                dto.Mood, dto.Hunger, dto.Thirst,
-                dto.Energy, dto.Steps, dto.Flags,
-                DateTime.UtcNow);
+            _state = new GotchiStateModel(dto.Mood, dto.Steps, DateTime.UtcNow);
     }
 
     public void EnqueueCommand(string cmd)

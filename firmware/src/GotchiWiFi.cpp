@@ -61,9 +61,10 @@ void GotchiWiFi::_pollCommand() {
     if (code == HTTP_CODE_OK) {
         String body = http.getString();
         body.toLowerCase();
-        if      (body.indexOf("feed")  >= 0) _state.feed();
-        else if (body.indexOf("drink") >= 0) _state.drink();
-        else if (body.indexOf("pet")   >= 0) _state.pet();
+        if      (body.indexOf("pet")     >= 0) _state.pet();
+        else if (body.indexOf("shake")   >= 0) _state.onShake(false);
+        else if (body.indexOf("startle") >= 0) _state.onFall();
+        else if (body.indexOf("noise")   >= 0) _state.onNoise(600.0f);
     } else if (code < 0) {
         Serial.printf("[WiFi] pollCommand error: %s\n", http.errorToString(code).c_str());
     }
@@ -74,12 +75,8 @@ void GotchiWiFi::_pushState() {
     GotchiStats s = _state.getStats();
 
     // Construir JSON manualmente — sin dependencias extra
-    String body  = "{\"mood\":"   + String((uint8_t)s.mood)
-                 + ",\"hunger\":" + String(s.hunger)
-                 + ",\"thirst\":" + String(s.thirst)
-                 + ",\"energy\":" + String(s.energy)
-                 + ",\"steps\":"  + String(s.steps)
-                 + ",\"flags\":"  + String(s.phoneBatteryWarn ? 1 : 0)
+    String body  = "{\"mood\":"  + String((uint8_t)s.mood)
+                 + ",\"steps\":" + String(s.steps)
                  + "}";
 
     WiFiClientSecure client;

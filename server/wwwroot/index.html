@@ -92,51 +92,27 @@
       pointer-events: none;
     }
     @keyframes floatUp {
-      0%   { transform: translateY(0)   scale(1);    opacity: 0.5; }
-      50%  { transform: translateY(-8px) scale(1.15); opacity: 1; }
-      100% { transform: translateY(0)   scale(1);    opacity: 0.5; }
+      0%   { transform: translateY(0)    scale(1);    opacity: 0.5; }
+      50%  { transform: translateY(-8px) scale(1.15); opacity: 1;   }
+      100% { transform: translateY(0)    scale(1);    opacity: 0.5; }
     }
 
-    /* ── Stats ── */
-    .stats {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-      margin-bottom: 1.4rem;
-    }
-    .stat {
+    /* ── Steps ── */
+    .steps {
       display: flex;
       align-items: center;
-      gap: 0.6rem;
-    }
-    .stat-icon { font-size: 1rem; width: 1.4rem; text-align: center; flex-shrink: 0; }
-    .bar-track {
-      flex: 1;
-      background: #252525;
-      border-radius: 999px;
-      height: 8px;
-      overflow: hidden;
-    }
-    .bar-fill {
-      height: 100%;
-      border-radius: 999px;
-      transition: width 0.6s ease;
-    }
-    .bar-fill.hunger { background: linear-gradient(90deg, #ea580c, #fb923c); }
-    .bar-fill.thirst { background: linear-gradient(90deg, #2563eb, #60a5fa); }
-    .bar-fill.energy { background: linear-gradient(90deg, #16a34a, #4ade80); }
-    .stat-val {
-      font-size: 0.7rem;
+      justify-content: center;
+      gap: 0.4rem;
+      margin-bottom: 1.4rem;
+      font-size: 0.8rem;
       color: #555;
-      width: 2.2rem;
-      text-align: right;
-      flex-shrink: 0;
     }
+    .steps span { color: #888; font-variant-numeric: tabular-nums; }
 
     /* ── Actions ── */
     .actions {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 0.6rem;
     }
     .btn {
@@ -144,7 +120,7 @@
       border: 1px solid #333;
       color: #ccc;
       border-radius: 1rem;
-      padding: 0.75rem 0.4rem;
+      padding: 0.85rem 0.4rem;
       cursor: pointer;
       font-size: 0.75rem;
       display: flex;
@@ -190,33 +166,22 @@
     <div class="mood-badge" id="badge">—</div>
   </div>
 
-  <div class="stats">
-    <div class="stat">
-      <span class="stat-icon">🍔</span>
-      <div class="bar-track"><div class="bar-fill hunger" id="bHunger" style="width:80%"></div></div>
-      <span class="stat-val" id="vHunger">80</span>
-    </div>
-    <div class="stat">
-      <span class="stat-icon">💧</span>
-      <div class="bar-track"><div class="bar-fill thirst" id="bThirst" style="width:80%"></div></div>
-      <span class="stat-val" id="vThirst">80</span>
-    </div>
-    <div class="stat">
-      <span class="stat-icon">⚡</span>
-      <div class="bar-track"><div class="bar-fill energy" id="bEnergy" style="width:90%"></div></div>
-      <span class="stat-val" id="vEnergy">90</span>
-    </div>
+  <div class="steps">
+    👟 <span id="steps">0</span> pasos
   </div>
 
   <div class="actions">
-    <button class="btn" id="btnFeed"  onclick="send('feed')">
-      <span class="btn-icon">🍔</span>Feed
+    <button class="btn" onclick="send('pet')">
+      <span class="btn-icon">🤗</span>Acariciar
     </button>
-    <button class="btn" id="btnDrink" onclick="send('drink')">
-      <span class="btn-icon">💧</span>Drink
+    <button class="btn" onclick="send('shake')">
+      <span class="btn-icon">🌀</span>Agitar
     </button>
-    <button class="btn" id="btnPet"   onclick="send('pet')">
-      <span class="btn-icon">🤗</span>Pet
+    <button class="btn" onclick="send('startle')">
+      <span class="btn-icon">💥</span>Asustar
+    </button>
+    <button class="btn" onclick="send('noise')">
+      <span class="btn-icon">🔊</span>Ruido
     </button>
   </div>
 
@@ -224,21 +189,16 @@
 </div>
 
 <script>
-  // índice = valor de Mood en el firmware
   const MOODS = [
     { name:'HAPPY',    eyes:'◕  ◕', mouth:'‿',  accent:'#22c55e' }, // 0
-    { name:'TIRED',    eyes:'─  ─', mouth:'‿',  accent:'#64748b' }, // 1
-    { name:'HUNGRY',   eyes:'◕  ◕', mouth:'ω',  accent:'#f97316' }, // 2
-    { name:'THIRSTY',  eyes:'ó  ó', mouth:'A',  accent:'#3b82f6' }, // 3
-    { name:'DIZZY',    eyes:'@  @', mouth:'~',  accent:'#a855f7' }, // 4
-    { name:'EXCITED',  eyes:'★  ★', mouth:'D',  accent:'#eab308' }, // 5
-    { name:'SCARED',   eyes:'O  O', mouth:'A',  accent:'#ef4444' }, // 6
-    { name:'LAUGHING', eyes:'^  ^', mouth:'D',  accent:'#22c55e' }, // 7
-    { name:'ANGRY',    eyes:'>  <', mouth:'∧',  accent:'#ef4444' }, // 8
-    { name:'SAD',      eyes:';  ;', mouth:'⌢',  accent:'#6366f1' }, // 9
-    { name:'SLEEPING', eyes:'─  ─', mouth:'‿',  accent:'#4f46e5' }, // 10
-    { name:'STARTLED', eyes:'O  O', mouth:'o',  accent:'#ef4444' }, // 11
-    { name:'ANNOYED',  eyes:'=  =', mouth:'¬',  accent:'#f97316' }, // 12
+    { name:'SLEEPING', eyes:'─  ─', mouth:'‿',  accent:'#4f46e5' }, // 1
+    { name:'BORED',    eyes:'·  ·', mouth:'⌢',  accent:'#6366f1' }, // 2
+    { name:'DIZZY',    eyes:'@  @', mouth:'~',  accent:'#a855f7' }, // 3
+    { name:'EXCITED',  eyes:'★  ★', mouth:'D',  accent:'#eab308' }, // 4
+    { name:'LAUGHING', eyes:'^  ^', mouth:'D',  accent:'#22c55e' }, // 5
+    { name:'ANGRY',    eyes:'>  <', mouth:'∧',  accent:'#ef4444' }, // 6
+    { name:'STARTLED', eyes:'O  O', mouth:'o',  accent:'#ef4444' }, // 7
+    { name:'ANNOYED',  eyes:'=  =', mouth:'¬',  accent:'#f97316' }, // 8
   ];
 
   let prevMood = -1;
@@ -252,16 +212,15 @@
     document.getElementById('badge').textContent = m.name;
     document.getElementById('badge').style.color = m.accent;
     document.documentElement.style.setProperty('--accent', m.accent);
+    document.getElementById('steps').textContent = s.steps ?? 0;
 
-    // Flash de borde al cambiar de mood
     if (s.mood !== prevMood) {
       const scr = document.getElementById('screen');
       scr.style.borderColor = m.accent;
       setTimeout(() => { scr.style.borderColor = ''; }, 500);
 
-      // Zzz solo mientras duerme
       let zzz = document.querySelector('.zzz');
-      if (s.mood === 10) {
+      if (s.mood === 1) {
         if (!zzz) {
           zzz = document.createElement('div');
           zzz.className = 'zzz';
@@ -273,15 +232,6 @@
       }
       prevMood = s.mood;
     }
-
-    setStat('bHunger', 'vHunger', s.hunger);
-    setStat('bThirst', 'vThirst', s.thirst);
-    setStat('bEnergy', 'vEnergy', s.energy);
-  }
-
-  function setStat(barId, valId, v) {
-    document.getElementById(barId).style.width = v + '%';
-    document.getElementById(valId).textContent = v;
   }
 
   function setOnline(online, updatedAt) {
@@ -305,7 +255,7 @@
       if (res.status === 204) { setOnline(false, null); return; }
       const s = await res.json();
       const ageMs = Date.now() - new Date(s.updatedAt).getTime();
-      setOnline(ageMs < 12000, s.updatedAt); // offline si no recibió nada en 12 s (4 polls)
+      setOnline(ageMs < 12000, s.updatedAt);
       applyState(s);
     } catch {
       setOnline(false, null);

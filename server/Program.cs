@@ -28,7 +28,7 @@ app.MapGet("/api/state/current", (GotchiStore store) =>
 // La web encola un comando (feed / drink / pet)
 app.MapPost("/api/command", (CommandDto dto, GotchiStore store) =>
 {
-    var valid = new[] { "feed", "drink", "pet" };
+    var valid = new[] { "pet", "shake", "startle", "noise" };
     if (!valid.Contains(dto.Command.ToLowerInvariant()))
         return Results.BadRequest(new { error = "Comando desconocido" });
 
