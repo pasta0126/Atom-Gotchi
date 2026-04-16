@@ -20,7 +20,6 @@ public sealed class GotchiStore : IDisposable
 
     // ── Device state ──────────────────────────────────────────────────────────
     private int      _mood      = 0;
-    private int      _steps     = 0;
     private DateTime _updatedAt = DateTime.MinValue;
 
     // ── Command queue ─────────────────────────────────────────────────────────
@@ -71,7 +70,6 @@ public sealed class GotchiStore : IDisposable
         lock (_lock)
         {
             _mood      = dto.Mood;
-            _steps     = dto.Steps;
             _updatedAt = DateTime.UtcNow;
             _Decay();
             return _BuildVitals();
@@ -244,7 +242,6 @@ public sealed class GotchiStore : IDisposable
         _sickAt          = DateTime.MinValue;
         _nextPoopMinutes = RandPoopInterval();
         _mood            = 0;
-        _steps           = 0;
         _pendingCommand  = null;
     }
 
@@ -253,7 +250,7 @@ public sealed class GotchiStore : IDisposable
         _sick, _dead, _needsClean, _sleeping);
 
     private GotchiStateModel _BuildModel() => new(
-        _mood, _steps,
+        _mood,
         (int)_hunger, (int)_happiness, (int)_energy,
         _sick, _dead, _needsClean, _sleeping,
         (DateTime.UtcNow - _bornAt).TotalHours,

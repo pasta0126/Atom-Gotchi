@@ -15,7 +15,9 @@ GotchiDisplay::GotchiDisplay()
       _stateUntil(0), _nextGlanceMs(0), _soundReactUntil(0),
       _gazeH(0), _gazeV(0), _targetGazeH(0), _targetGazeV(0),
       _lastMood(255),
-      _moodFlashUntil(0)
+      _moodFlashUntil(0),
+      _needsAttention(false), _lastAttentionFlash(0),
+      _flashCount(0), _flashPhase(false), _flashNext(0)
 {
     memset(_alertText, 0, sizeof(_alertText));
 }
@@ -61,6 +63,8 @@ void GotchiDisplay::update(const GotchiStats& stats, float ax, float ay, float m
 
     // ── Alertas de stats bajos ────────────────────────────────────────────
     unsigned long now = millis();
+
+    _needsAttention = stats.needsAttention;
 
     if (stats.hunger    >= 30) _warnHunger    = false;
     if (stats.happiness >= 30) _warnHappiness = false;
@@ -134,7 +138,7 @@ void GotchiDisplay::_tick(Avatar* av) {
     unsigned long now = millis();
     Mood mood = (Mood)_currentMood;
 
-    // ── 0. Quitar borde tras el flash (0.5s) ─────────────────────────────
+    // ── 0. Quitar borde tras el flash de mood (0.5s) ─────────────────────
     if (_moodFlashUntil > 0 && now >= _moodFlashUntil) {
         _moodFlashUntil = 0;
         ColorPalette cp = _neutralPalette();
@@ -218,6 +222,30 @@ void GotchiDisplay::_tick(Avatar* av) {
 
     av->setRightGaze(gv, gh);
     av->setLeftGaze(gv, gh);
+
+    // ── 7. Animación LED ──────────────────────────────────────────────────
+    _animateLED(mood, now);
+
+    // ── 8. Flash de pantalla para llamar la atención ──────────────────────
+    // Activa cada 30 s cuando el gotchi necesita cuidado y no está durmiendo
+    if (_needsAttention && !isSleeping && _flashCount == 0) {
+        if ((now - _lastAttentionFlash) > 30000UL) {
+            _lastAttentionFlash = now;
+            _flashCount = 6;   // 3 destellos = 6 transiciones brillante/oscuro
+            _flashPhase = true;
+            _flashNext  = now;
+        }
+    }
+
+    if (_flashCount > 0 && now >= _flashNext) {
+        M5.Display.setBrightness(_flashPhase ? 255 : 20);
+        _flashPhase = !_flashPhase;
+        _flashCount--;
+        _flashNext = now + 130;
+        if (_flashCount == 0) {
+            M5.Display.setBrightness(180); // restaurar brillo normal
+        }
+    }
 }
 
 // ─── LED ──────────────────────────────────────────────────────────────────────
@@ -387,5 +415,93 @@ float GotchiDisplay::_moodMouthRatio(Mood m) {
         case Mood::SAD:      return 0.10f;
         case Mood::DEAD:     return 0.00f;
         default:             return 0.05f;
+    }
+}
+
+// ─── LED animado según mood ───────────────────────────────────────────────────
+// Corre en la tarea FreeRTOS cada 50 ms
+void GotchiDisplay::_animateLED(Mood m, unsigned long now) {
+    float t = (float)now;
+
+    switch (m) {
+        case Mood::DEAD: {
+            // Parpadeo lento rojo apagado — peligro mínimo
+            bool on = (now / 800) % 2;
+            M5.Led.setColor(0, on ? 25 : 0, 0, 0);
+            break;
+        }
+        case Mood::SICK: {
+            // Pulso verde enfermizo
+            float p = (sinf(t / 600.0f) + 1.0f) * 0.5f;
+            M5.Led.setColor(0, 0, (uint8_t)(30.0f * p), 0);
+            break;
+        }
+        case Mood::HUNGRY: {
+            // Pulso naranja medio
+            float p = (sinf(t / 700.0f) + 1.0f) * 0.5f;
+            M5.Led.setColor(0, (uint8_t)(60.0f * p), (uint8_t)(15.0f * p), 0);
+            break;
+        }
+        case Mood::SAD: {
+            // Pulso azul suave
+            float p = (sinf(t / 900.0f) + 1.0f) * 0.5f;
+            M5.Led.setColor(0, 0, 0, (uint8_t)(40.0f * p));
+            break;
+        }
+        case Mood::SLEEPING: {
+            // Respiración azul muy lenta
+            float p = (sinf(t / 2500.0f) + 1.0f) * 0.5f;
+            M5.Led.setColor(0, 0, 0, (uint8_t)(18.0f * p));
+            break;
+        }
+        case Mood::LAUGHING: {
+            // Pulso verde brillante rápido
+            float p = (sinf(t / 180.0f) + 1.0f) * 0.5f;
+            M5.Led.setColor(0, 0, (uint8_t)(80.0f * p), (uint8_t)(20.0f * p));
+            break;
+        }
+        case Mood::EXCITED: {
+            // Pulso amarillo rápido
+            float p = (sinf(t / 220.0f) + 1.0f) * 0.5f;
+            M5.Led.setColor(0, (uint8_t)(70.0f * p), (uint8_t)(50.0f * p), 0);
+            break;
+        }
+        case Mood::ANGRY: {
+            // Parpadeo rojo agresivo
+            bool on = (now / 150) % 2;
+            M5.Led.setColor(0, on ? 80 : 10, 0, 0);
+            break;
+        }
+        case Mood::STARTLED: {
+            // Parpadeo naranja rápido
+            bool on = (now / 100) % 2;
+            M5.Led.setColor(0, on ? 70 : 0, on ? 20 : 0, 0);
+            break;
+        }
+        case Mood::ANNOYED: {
+            // Pulso naranja oscuro lento
+            float p = (sinf(t / 500.0f) + 1.0f) * 0.5f;
+            M5.Led.setColor(0, (uint8_t)(40.0f * p), (uint8_t)(10.0f * p), 0);
+            break;
+        }
+        case Mood::DIZZY: {
+            // Cicla entre lila y apagado
+            float p = (sinf(t / 300.0f) + 1.0f) * 0.5f;
+            M5.Led.setColor(0, (uint8_t)(30.0f * p), 0, (uint8_t)(50.0f * p));
+            break;
+        }
+        case Mood::BORED: {
+            // Latido muy lento azul tenue
+            float p = (sinf(t / 3000.0f) + 1.0f) * 0.5f;
+            M5.Led.setColor(0, 0, 0, (uint8_t)(12.0f * p));
+            break;
+        }
+        default: // HAPPY
+        {
+            // Pulso verde suave — "todo bien"
+            float p = (sinf(t / 1800.0f) + 1.0f) * 0.5f;
+            M5.Led.setColor(0, 0, (uint8_t)(20.0f + 15.0f * p), 0);
+            break;
+        }
     }
 }

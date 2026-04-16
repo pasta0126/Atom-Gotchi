@@ -51,6 +51,13 @@ private:
     bool _warnEnergy;
     bool _warnSick;
 
+    // Flash de atención (pantalla + LED)
+    volatile bool   _needsAttention;
+    unsigned long   _lastAttentionFlash;  // última vez que se hizo flash
+    volatile int    _flashCount;          // transiciones restantes (6 = 3 destellos)
+    volatile bool   _flashPhase;          // true=brillante, false=oscuro
+    volatile unsigned long _flashNext;    // cuándo ejecutar la próxima transición
+
     // ── Animación autónoma (corre en tarea FreeRTOS del Avatar) ──────────
     LifeState     _lifeState;
     unsigned long _stateUntil;     // cuándo termina el estado actual
@@ -85,4 +92,5 @@ private:
     static uint16_t     _moodAccent565(Mood m);
     static uint32_t     _moodToLED(Mood m);
     static float        _moodMouthRatio(Mood m);
+    static void         _animateLED(Mood m, unsigned long now);
 };

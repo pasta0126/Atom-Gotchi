@@ -3,9 +3,8 @@
 
 GotchiState::GotchiState()
     : _mood(Mood::HAPPY), _moodChanged(true),
-      _steps(0),
       _hunger(80), _happiness(80), _energy(80),
-      _isSick(false), _isDead(false), _serverSleeping(false),
+      _isSick(false), _isDead(false), _serverSleeping(false), _needsAttentionFlag(false),
       _isDizzy(false), _isExcited(false), _isLaughing(false),
       _isAngry(false), _isStartled(false), _isAnnoyed(false),
       _inducedSleep(false), _noiseActive(false),
@@ -38,13 +37,14 @@ void GotchiState::update() {
 // ─── Vitals desde servidor ────────────────────────────────────────────────────
 
 void GotchiState::setVitals(int hunger, int happiness, int energy,
-                             bool sick, bool dead, bool sleeping) {
-    _hunger         = (uint8_t)constrain(hunger,    0, 100);
-    _happiness      = (uint8_t)constrain(happiness, 0, 100);
-    _energy         = (uint8_t)constrain(energy,    0, 100);
-    _isSick         = sick;
-    _isDead         = dead;
-    _serverSleeping = sleeping;
+                             bool sick, bool dead, bool sleeping, bool needsClean) {
+    _hunger              = (uint8_t)constrain(hunger,    0, 100);
+    _happiness           = (uint8_t)constrain(happiness, 0, 100);
+    _energy              = (uint8_t)constrain(energy,    0, 100);
+    _isSick              = sick;
+    _isDead              = dead;
+    _serverSleeping      = sleeping;
+    _needsAttentionFlag  = (needsClean || sick || dead || hunger < 40);
     _recalcMood();
 }
 
@@ -98,11 +98,6 @@ void GotchiState::onDizzy(float gyroMagnitude) {
         _isLaughing = false;
         _recalcMood();
     }
-}
-
-void GotchiState::onStep() {
-    if (_steps < 65535) _steps++;
-    _inducedSleep = false;
 }
 
 void GotchiState::onFall() {
@@ -232,5 +227,5 @@ void GotchiState::_recalcMood() {
 }
 
 GotchiStats GotchiState::getStats() const {
-    return { _mood, _steps, _hunger, _happiness, _energy };
+    return { _mood, _hunger, _happiness, _energy, _needsAttentionFlag };
 }

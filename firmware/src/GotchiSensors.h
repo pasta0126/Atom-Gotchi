@@ -16,9 +16,7 @@ private:
     // ── IMU ────────────────────────────────────────────────────────────────
     void _updateIMU();
 
-    // Paso (peak-valley sobre magnitud de aceleración)
-    bool  _stepPending;
-    float _lastMagnitude;
+    float _lastMagnitude;  // para cálculo de varianza de movimiento
 
     // Orientación (boca arriba/abajo con timers)
     unsigned long _faceDownSince;   // 0 = no está boca abajo
@@ -47,8 +45,6 @@ private:
 
     unsigned long _lastIMURead;
 
-    static constexpr float STEP_HIGH           = 1.25f;  // g
-    static constexpr float STEP_LOW            = 0.85f;  // g
     static constexpr float FACE_THRESHOLD      = 0.82f;  // g en eje Z
     static constexpr float FALL_FREEFALL       = 0.35f;  // g total < esto = caída libre
     static constexpr float FALL_IMPACT         = 2.5f;   // g total > esto = impacto

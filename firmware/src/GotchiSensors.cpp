@@ -3,7 +3,7 @@
 
 GotchiSensors::GotchiSensors(GotchiState& state)
     : _state(state), _lastRms(0),
-      _stepPending(false), _lastMagnitude(1.0f),
+      _lastMagnitude(1.0f),
       _faceDownSince(0), _faceUpSince(0),
       _faceDownFired(false), _faceUpFired(false),
       _lastMovementMs(0), _inactivityFired(false),
@@ -50,18 +50,7 @@ void GotchiSensors::_updateIMU() {
     float mag     = sqrtf(ax*ax + ay*ay + az*az);
     float gyroMag = sqrtf(gx*gx + gy*gy + gz*gz);
 
-    // ── 1. Detección de pasos (peak-valley) ───────────────────────────────
-    // Solo procesamos pasos si la variación es del tipo "paso" (no sacudida fuerte)
-    if (gyroMag < SHAKE_LIGHT_GYRO) {  // si hay mucho giro, no son pasos
-        if (!_stepPending && mag > STEP_HIGH) {
-            _stepPending = true;
-        } else if (_stepPending && mag < STEP_LOW) {
-            _stepPending = false;
-            _state.onStep();
-        }
-    }
-
-    // ── 2. Detección de movimiento (para inactividad) ─────────────────────
+    // ── 1. Detección de movimiento (para inactividad) ────────────────────
     // Guardamos variación de magnitud en ventana circular
     float variation = fabsf(mag - _lastMagnitude);
     _accelVariance[_varHead] = variation;

@@ -73,9 +73,7 @@ void GotchiWiFi::_pollCommand() {
 void GotchiWiFi::_pushState() {
     GotchiStats s = _state.getStats();
 
-    String body = "{\"mood\":"  + String((uint8_t)s.mood)
-                + ",\"steps\":" + String(s.steps)
-                + "}";
+    String body = "{\"mood\":" + String((uint8_t)s.mood) + "}";
 
     WiFiClientSecure client;
     client.setInsecure();
@@ -106,12 +104,13 @@ void GotchiWiFi::_pushState() {
         int hunger    = getInt("hunger");
         int happiness = getInt("happiness");
         int energy    = getInt("energy");
-        bool sick     = getBool("sick");
-        bool dead     = getBool("dead");
-        bool sleeping = getBool("sleeping");
+        bool sick      = getBool("sick");
+        bool dead      = getBool("dead");
+        bool needsClean = getBool("needsClean");
+        bool sleeping  = getBool("sleeping");
 
         if (hunger >= 0) {
-            _state.setVitals(hunger, happiness, energy, sick, dead, sleeping);
+            _state.setVitals(hunger, happiness, energy, sick, dead, sleeping, needsClean);
         }
     } else if (code < 0) {
         Serial.printf("[WiFi] pushState error: %s\n", http.errorToString(code).c_str());
