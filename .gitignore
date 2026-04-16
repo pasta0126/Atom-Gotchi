@@ -1,0 +1,17 @@
+# ── PlatformIO ──────────────────────────────────────────────
+firmware/.pio/
+
+# Credenciales locales (nunca commitear)
+firmware/src/credentials.h
+
+# ── .NET / servidor ─────────────────────────────────────────
+server/bin/
+server/obj/
+
+# ── IDEs / herramientas locales ──────────────────────────────
+*.sln
+.omc/
+
+# ── OS ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
