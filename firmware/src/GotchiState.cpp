@@ -4,6 +4,8 @@
 GotchiState::GotchiState()
     : _mood(Mood::HAPPY), _moodChanged(true),
       _steps(0),
+      _hunger(80), _happiness(80), _energy(80),
+      _isSick(false), _isDead(false), _serverSleeping(false),
       _isDizzy(false), _isExcited(false), _isLaughing(false),
       _isAngry(false), _isStartled(false), _isAnnoyed(false),
       _inducedSleep(false), _noiseActive(false),
@@ -33,6 +35,19 @@ void GotchiState::update() {
     _recalcMood();
 }
 
+// ─── Vitals desde servidor ────────────────────────────────────────────────────
+
+void GotchiState::setVitals(int hunger, int happiness, int energy,
+                             bool sick, bool dead, bool sleeping) {
+    _hunger         = (uint8_t)constrain(hunger,    0, 100);
+    _happiness      = (uint8_t)constrain(happiness, 0, 100);
+    _energy         = (uint8_t)constrain(energy,    0, 100);
+    _isSick         = sick;
+    _isDead         = dead;
+    _serverSleeping = sleeping;
+    _recalcMood();
+}
+
 // ─── Acciones del usuario ─────────────────────────────────────────────────────
 
 void GotchiState::_touchInteraction() {
@@ -41,7 +56,7 @@ void GotchiState::_touchInteraction() {
 
 void GotchiState::pet() {
     _touchInteraction();
-    if (!_isAngry && !_isDizzy) {
+    if (!_isAngry && !_isDizzy && !_isDead) {
         _isLaughing    = true;
         _laughingUntil = millis() + 2000;
     }
@@ -52,7 +67,7 @@ void GotchiState::pet() {
 // ─── Eventos de sensores ──────────────────────────────────────────────────────
 
 void GotchiState::onNoise(float rmsLevel) {
-    if (rmsLevel > NOISE_THRESHOLD && !_isAngry && !_isDizzy && !_isAnnoyed) {
+    if (rmsLevel > NOISE_THRESHOLD && !_isAngry && !_isDizzy && !_isAnnoyed && !_isDead) {
         _touchInteraction();
         _isExcited    = true;
         unsigned long dur = (unsigned long)constrain(rmsLevel / 100.0f, 1.0f, 5.0f) * 1000;
@@ -65,7 +80,7 @@ void GotchiState::onSustainedNoise(bool active) {
     if (active == _noiseActive) return;
     _noiseActive = active;
 
-    if (active && !_isAngry && !_isDizzy && !_isStartled) {
+    if (active && !_isAngry && !_isDizzy && !_isStartled && !_isDead) {
         _isAnnoyed    = true;
         _annoyedUntil = millis() + 6000;
         _isExcited    = false;
@@ -76,7 +91,7 @@ void GotchiState::onSustainedNoise(bool active) {
 }
 
 void GotchiState::onDizzy(float gyroMagnitude) {
-    if (gyroMagnitude > DIZZY_THRESHOLD && !_isStartled) {
+    if (gyroMagnitude > DIZZY_THRESHOLD && !_isStartled && !_isDead) {
         _isDizzy    = true;
         _dizzyUntil = millis() + 4000;
         _isExcited  = false;
@@ -91,6 +106,7 @@ void GotchiState::onStep() {
 }
 
 void GotchiState::onFall() {
+    if (_isDead) return;
     _touchInteraction();
     _isStartled    = true;
     _startledUntil = millis() + 4000;
@@ -101,6 +117,7 @@ void GotchiState::onFall() {
 }
 
 void GotchiState::onShake(bool strong) {
+    if (_isDead) return;
     _touchInteraction();
     _inducedSleep = false;
 
@@ -118,7 +135,7 @@ void GotchiState::onShake(bool strong) {
 }
 
 void GotchiState::onFaceDown30s() {
-    if (!_isAngry) {
+    if (!_isAngry && !_isDead) {
         _isAngry    = true;
         _angryUntil = millis() + 8000;
         _recalcMood();
@@ -126,7 +143,7 @@ void GotchiState::onFaceDown30s() {
 }
 
 void GotchiState::onFaceUp5min() {
-    if (!_isExcited && !_isAngry && !_isStartled) {
+    if (!_isExcited && !_isAngry && !_isStartled && !_isDead) {
         _inducedSleep      = true;
         _inducedSleepUntil = millis() + 600000UL;
         _recalcMood();
@@ -134,7 +151,7 @@ void GotchiState::onFaceUp5min() {
 }
 
 void GotchiState::onInactivity5min() {
-    if (!_isExcited && !_isAngry && !_isStartled) {
+    if (!_isExcited && !_isAngry && !_isStartled && !_isDead) {
         _inducedSleep      = true;
         _inducedSleepUntil = millis() + 600000UL;
         _recalcMood();
@@ -142,6 +159,7 @@ void GotchiState::onInactivity5min() {
 }
 
 void GotchiState::onButtonClick() {
+    if (_isDead) return;
     unsigned long now = millis();
     _touchInteraction();
     _inducedSleep = false;
@@ -193,15 +211,19 @@ void GotchiState::_recalcMood() {
 
     Mood newMood;
 
-    if      (_isStartled)   newMood = Mood::STARTLED;
-    else if (_isAngry)      newMood = Mood::ANGRY;
-    else if (_isAnnoyed)    newMood = Mood::ANNOYED;
-    else if (_isDizzy)      newMood = Mood::DIZZY;
-    else if (_isLaughing)   newMood = Mood::LAUGHING;
-    else if (_isExcited)    newMood = Mood::EXCITED;
-    else if (_inducedSleep) newMood = Mood::SLEEPING;
-    else if (isBored)       newMood = Mood::BORED;
-    else                    newMood = Mood::HAPPY;
+    if      (_isDead)                           newMood = Mood::DEAD;
+    else if (_isSick)                           newMood = Mood::SICK;
+    else if (_isStartled)                       newMood = Mood::STARTLED;
+    else if (_isAngry)                          newMood = Mood::ANGRY;
+    else if (_isAnnoyed)                        newMood = Mood::ANNOYED;
+    else if (_isDizzy)                          newMood = Mood::DIZZY;
+    else if (_isLaughing)                       newMood = Mood::LAUGHING;
+    else if (_isExcited)                        newMood = Mood::EXCITED;
+    else if (_inducedSleep || _serverSleeping)  newMood = Mood::SLEEPING;
+    else if (_hunger < 25)                      newMood = Mood::HUNGRY;
+    else if (_happiness < 25)                   newMood = Mood::SAD;
+    else if (isBored)                           newMood = Mood::BORED;
+    else                                        newMood = Mood::HAPPY;
 
     if (newMood != _mood) {
         _mood        = newMood;
@@ -210,5 +232,5 @@ void GotchiState::_recalcMood() {
 }
 
 GotchiStats GotchiState::getStats() const {
-    return { _mood, _steps };
+    return { _mood, _steps, _hunger, _happiness, _energy };
 }

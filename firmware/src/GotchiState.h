@@ -11,11 +11,18 @@ enum class Mood : uint8_t {
     ANGRY     = 6,
     STARTLED  = 7,
     ANNOYED   = 8,
+    HUNGRY    = 9,
+    SAD       = 10,
+    SICK      = 11,
+    DEAD      = 12,
 };
 
 struct GotchiStats {
     Mood     mood;
     uint16_t steps;
+    uint8_t  hunger;
+    uint8_t  happiness;
+    uint8_t  energy;
 };
 
 class GotchiState {
@@ -23,6 +30,10 @@ public:
     GotchiState();
 
     void update();
+
+    // ── Vitals desde el servidor ───────────────────────────────────────────
+    void setVitals(int hunger, int happiness, int energy,
+                   bool sick, bool dead, bool sleeping);
 
     // ── Acciones desde app/web ─────────────────────────────────────────────
     void pet();
@@ -51,6 +62,15 @@ private:
     bool         _moodChanged;
     uint16_t     _steps;
 
+    // ── Vitals (recibidos del servidor) ────────────────────────────────────
+    uint8_t      _hunger;
+    uint8_t      _happiness;
+    uint8_t      _energy;
+    bool         _isSick;
+    bool         _isDead;
+    bool         _serverSleeping;
+
+    // ── Flags de sensores con timestamps ──────────────────────────────────
     bool          _isDizzy;
     bool          _isExcited;
     bool          _isLaughing;

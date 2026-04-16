@@ -47,8 +47,9 @@ private:
 
     // Umbral ya notificado para no repetir
     bool _warnHunger;
-    bool _warnThirst;
+    bool _warnHappiness;
     bool _warnEnergy;
+    bool _warnSick;
 
     // ── Animación autónoma (corre en tarea FreeRTOS del Avatar) ──────────
     LifeState     _lifeState;

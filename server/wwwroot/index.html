@@ -60,20 +60,21 @@
       50%      { box-shadow: 0 0 10px 3px currentColor; opacity: 0.7; }
     }
     .dot-pulse { animation: pulse-dot 1.8s ease-in-out infinite; }
+    @keyframes pulse-badge {
+      0%,100% { opacity: 1; }
+      50%      { opacity: 0.5; }
+    }
+    .badge-pulse { animation: pulse-badge 1.2s ease-in-out infinite; }
     body { min-height: 100dvh; }
     .btn-action {
       transition: background 0.15s, transform 0.1s, color 0.15s, box-shadow 0.15s;
     }
     .btn-action:active:not(:disabled) { transform: scale(0.93); }
     .btn-action:disabled { opacity: 0.35; cursor: not-allowed; }
-    .material-symbols-outlined {
-      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-    }
   </style>
 </head>
 <body class="bg-[#0a0a0a] font-body text-on-surface flex flex-col items-center selection:bg-primary/30">
 
-  <!-- Background grain -->
   <div class="fixed inset-0 pointer-events-none grain z-0"></div>
 
   <!-- TOP BAR -->
@@ -87,10 +88,10 @@
   </header>
 
   <!-- MAIN -->
-  <main class="w-full max-w-md px-5 pt-20 pb-8 flex flex-col items-center gap-6 relative z-10">
+  <main class="w-full max-w-md px-5 pt-20 pb-8 flex flex-col items-center gap-5 relative z-10">
 
     <!-- FEEDBACK -->
-    <div id="feedbackWrap" class="h-7 flex items-center justify-center w-full">
+    <div class="h-6 flex items-center justify-center w-full">
       <div id="feedback" class="text-xs font-headline tracking-wide transition-all duration-300 opacity-0"></div>
     </div>
 
@@ -99,13 +100,11 @@
          class="w-full aspect-square max-w-xs bg-surface-container-lowest rounded-2xl relative overflow-hidden transition-all duration-500"
          style="box-shadow: inset 0 0 30px rgba(107,255,143,0.08), 0 0 0 1px rgba(107,255,143,0.15);">
 
-      <!-- Scanline overlay -->
       <div class="absolute inset-0 scanline pointer-events-none z-10"></div>
 
-      <!-- Inner layout -->
       <div class="h-full w-full flex flex-col items-center justify-center relative">
 
-        <!-- Zzz (only when sleeping) -->
+        <!-- Zzz (sleeping) -->
         <div id="zzz" class="hidden absolute top-4 right-5 text-sm font-headline zzz" style="color:#9492ff;">Zzz</div>
 
         <!-- ASCII Face -->
@@ -120,7 +119,151 @@
           <span id="moodDot" class="w-1.5 h-1.5 rounded-full" style="background:#6bff8f;"></span>
           <span id="badge" class="text-[10px] font-headline font-bold tracking-widest" style="color:#6bff8f;">—</span>
         </div>
+
+        <!-- Dead overlay -->
+        <div id="deadOverlay" class="hidden absolute inset-0 flex flex-col items-center justify-center gap-3 z-20 rounded-2xl"
+             style="background: rgba(0,0,0,0.88);">
+          <div class="text-5xl">💀</div>
+          <div class="font-headline font-bold tracking-widest text-sm text-on-surface-variant">GAME OVER</div>
+          <button onclick="send('restart')"
+                  class="mt-1 px-6 py-2 rounded-full font-headline text-[11px] font-bold tracking-widest
+                         ring-1 ring-white/20 hover:ring-white/50 hover:bg-white/10 transition-all text-on-surface">
+            REINICIAR
+          </button>
+        </div>
       </div>
+    </div>
+
+    <!-- STAT BARS -->
+    <div class="w-full max-w-xs space-y-2.5">
+      <!-- Hunger -->
+      <div class="flex items-center gap-3">
+        <span class="text-lg w-6 text-center">🍎</span>
+        <div class="flex-1">
+          <div class="flex justify-between mb-1">
+            <span class="text-[9px] font-headline uppercase tracking-widest text-on-surface-variant">Hambre</span>
+            <span id="hungerVal" class="text-[9px] font-headline text-on-surface-variant">—</span>
+          </div>
+          <div class="h-1.5 rounded-full bg-surface-container-high overflow-hidden">
+            <div id="hungerBar" class="h-full rounded-full transition-all duration-700" style="width:80%;background:#6bff8f;"></div>
+          </div>
+        </div>
+      </div>
+      <!-- Happiness -->
+      <div class="flex items-center gap-3">
+        <span class="text-lg w-6 text-center">😊</span>
+        <div class="flex-1">
+          <div class="flex justify-between mb-1">
+            <span class="text-[9px] font-headline uppercase tracking-widest text-on-surface-variant">Alegría</span>
+            <span id="happinessVal" class="text-[9px] font-headline text-on-surface-variant">—</span>
+          </div>
+          <div class="h-1.5 rounded-full bg-surface-container-high overflow-hidden">
+            <div id="happinessBar" class="h-full rounded-full transition-all duration-700" style="width:80%;background:#6bff8f;"></div>
+          </div>
+        </div>
+      </div>
+      <!-- Energy -->
+      <div class="flex items-center gap-3">
+        <span class="text-lg w-6 text-center">⚡</span>
+        <div class="flex-1">
+          <div class="flex justify-between mb-1">
+            <span class="text-[9px] font-headline uppercase tracking-widest text-on-surface-variant">Energía</span>
+            <span id="energyVal" class="text-[9px] font-headline text-on-surface-variant">—</span>
+          </div>
+          <div class="h-1.5 rounded-full bg-surface-container-high overflow-hidden">
+            <div id="energyBar" class="h-full rounded-full transition-all duration-700" style="width:80%;background:#9492ff;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATUS ROW (poop · sick · age) -->
+    <div class="flex items-center gap-2 w-full max-w-xs">
+      <div id="poopBadge" style="display:none"
+           class="badge-pulse flex items-center gap-1.5 px-2.5 py-1 rounded-full ring-1 ring-white/10 bg-surface-container-high text-xs">
+        <span>💩</span>
+        <span class="font-headline text-[9px] uppercase tracking-widest text-on-surface-variant">Limpiar</span>
+      </div>
+      <div id="sickBadge" style="display:none"
+           class="badge-pulse flex items-center gap-1.5 px-2.5 py-1 rounded-full ring-1 ring-white/10 bg-surface-container-high text-xs">
+        <span>🤒</span>
+        <span class="font-headline text-[9px] uppercase tracking-widest text-on-surface-variant">Medicina</span>
+      </div>
+      <span id="ageDisplay" class="text-[9px] font-headline text-on-surface-variant ml-auto">—</span>
+    </div>
+
+    <!-- CARE BUTTONS 3×2 -->
+    <div class="grid grid-cols-3 gap-2.5 w-full max-w-xs">
+
+      <button class="btn-action flex flex-col items-center justify-center gap-1.5 p-4
+                     bg-surface-container-high/60 backdrop-blur-sm rounded-xl
+                     ring-1 ring-white/5 hover:bg-surface-container-high hover:ring-primary/30 group"
+              onclick="send('feed')" id="btn-feed">
+        <span class="text-xl group-hover:scale-110 transition-transform">🍎</span>
+        <span class="text-[10px] font-headline text-on-surface-variant group-hover:text-primary transition-colors">Alimentar</span>
+      </button>
+
+      <button class="btn-action flex flex-col items-center justify-center gap-1.5 p-4
+                     bg-surface-container-high/60 backdrop-blur-sm rounded-xl
+                     ring-1 ring-white/5 hover:bg-surface-container-high hover:ring-tertiary/30 group"
+              onclick="send('play')" id="btn-play">
+        <span class="text-xl group-hover:scale-110 transition-transform">🎮</span>
+        <span class="text-[10px] font-headline text-on-surface-variant group-hover:text-tertiary transition-colors">Jugar</span>
+      </button>
+
+      <button class="btn-action flex flex-col items-center justify-center gap-1.5 p-4
+                     bg-surface-container-high/60 backdrop-blur-sm rounded-xl
+                     ring-1 ring-white/5 hover:bg-surface-container-high hover:ring-primary/30 group"
+              onclick="send('pet')" id="btn-pet">
+        <span class="text-xl group-hover:scale-110 transition-transform">🤗</span>
+        <span class="text-[10px] font-headline text-on-surface-variant group-hover:text-primary transition-colors">Acariciar</span>
+      </button>
+
+      <button class="btn-action flex flex-col items-center justify-center gap-1.5 p-4
+                     bg-surface-container-high/60 backdrop-blur-sm rounded-xl
+                     ring-1 ring-white/5 hover:bg-surface-container-high hover:ring-secondary/30 group"
+              onclick="send('sleep')" id="btn-sleep">
+        <span id="sleepIcon" class="text-xl group-hover:scale-110 transition-transform">💤</span>
+        <span id="sleepLabel" class="text-[10px] font-headline text-on-surface-variant group-hover:text-secondary transition-colors">Dormir</span>
+      </button>
+
+      <button class="btn-action flex flex-col items-center justify-center gap-1.5 p-4
+                     bg-surface-container-high/60 backdrop-blur-sm rounded-xl
+                     ring-1 ring-white/5 hover:bg-surface-container-high hover:ring-primary/30 group"
+              onclick="send('medicine')" id="btn-medicine">
+        <span class="text-xl group-hover:scale-110 transition-transform">💊</span>
+        <span class="text-[10px] font-headline text-on-surface-variant group-hover:text-primary transition-colors">Medicina</span>
+      </button>
+
+      <button class="btn-action flex flex-col items-center justify-center gap-1.5 p-4
+                     bg-surface-container-high/60 backdrop-blur-sm rounded-xl
+                     ring-1 ring-white/5 hover:bg-surface-container-high hover:ring-primary/30 group"
+              onclick="send('clean')" id="btn-clean">
+        <span class="text-xl group-hover:scale-110 transition-transform">🧹</span>
+        <span class="text-[10px] font-headline text-on-surface-variant group-hover:text-primary transition-colors">Limpiar</span>
+      </button>
+
+    </div>
+
+    <!-- FUN BUTTONS 2×1 -->
+    <div class="grid grid-cols-2 gap-2.5 w-full max-w-xs">
+
+      <button class="btn-action flex flex-col items-center justify-center gap-1.5 p-3
+                     bg-surface-container/60 backdrop-blur-sm rounded-xl
+                     ring-1 ring-white/5 hover:bg-surface-container hover:ring-secondary/20 group"
+              onclick="send('shake')" id="btn-shake">
+        <span class="text-lg group-hover:rotate-12 transition-transform">🌀</span>
+        <span class="text-[10px] font-headline text-on-surface-variant group-hover:text-secondary transition-colors">Agitar</span>
+      </button>
+
+      <button class="btn-action flex flex-col items-center justify-center gap-1.5 p-3
+                     bg-surface-container/60 backdrop-blur-sm rounded-xl
+                     ring-1 ring-white/5 hover:bg-surface-container hover:ring-error/20 group"
+              onclick="send('startle')" id="btn-startle">
+        <span class="text-lg group-hover:scale-90 transition-transform">💥</span>
+        <span class="text-[10px] font-headline text-on-surface-variant group-hover:text-error transition-colors">Asustar</span>
+      </button>
+
     </div>
 
     <!-- STEPS -->
@@ -130,45 +273,6 @@
         <span id="steps" class="text-lg font-headline font-bold text-on-surface">0</span>
         <span class="text-[10px] uppercase text-on-surface-variant tracking-widest">pasos</span>
       </div>
-    </div>
-
-    <!-- ACTION BUTTONS 2×2 -->
-    <div class="grid grid-cols-2 gap-3 w-full max-w-xs">
-      <button class="btn-action flex flex-col items-center justify-center gap-2 p-5
-                     bg-surface-container-high/60 backdrop-blur-sm rounded-2xl
-                     ring-1 ring-white/5 hover:bg-surface-container-high
-                     hover:ring-primary/20 group"
-              onclick="send('pet')" id="btn-pet">
-        <span class="text-2xl group-hover:scale-110 transition-transform">🤗</span>
-        <span class="text-xs font-headline text-on-surface-variant group-hover:text-primary transition-colors">Acariciar</span>
-      </button>
-
-      <button class="btn-action flex flex-col items-center justify-center gap-2 p-5
-                     bg-surface-container-high/60 backdrop-blur-sm rounded-2xl
-                     ring-1 ring-white/5 hover:bg-surface-container-high
-                     hover:ring-secondary/30 group"
-              onclick="send('shake')" id="btn-shake">
-        <span class="text-2xl group-hover:rotate-12 transition-transform">🌀</span>
-        <span class="text-xs font-headline text-on-surface-variant group-hover:text-secondary transition-colors">Agitar</span>
-      </button>
-
-      <button class="btn-action flex flex-col items-center justify-center gap-2 p-5
-                     bg-surface-container-high/60 backdrop-blur-sm rounded-2xl
-                     ring-1 ring-white/5 hover:bg-surface-container-high
-                     hover:ring-error/30 group"
-              onclick="send('startle')" id="btn-startle">
-        <span class="text-2xl group-hover:scale-90 transition-transform">💥</span>
-        <span class="text-xs font-headline text-on-surface-variant group-hover:text-error transition-colors">Asustar</span>
-      </button>
-
-      <button class="btn-action flex flex-col items-center justify-center gap-2 p-5
-                     bg-surface-container-high/60 backdrop-blur-sm rounded-2xl
-                     ring-1 ring-white/5 hover:bg-surface-container-high
-                     hover:ring-tertiary/30 group"
-              onclick="send('noise')" id="btn-noise">
-        <span class="text-2xl group-hover:scale-125 transition-transform">🔊</span>
-        <span class="text-xs font-headline text-on-surface-variant group-hover:text-tertiary transition-colors">Ruido</span>
-      </button>
     </div>
 
   </main>
@@ -184,14 +288,31 @@
       { name:'ANGRY',    eyes:'>  <', mouth:'∧',  accent:'#ff7351' }, // 6
       { name:'STARTLED', eyes:'O  O', mouth:'o',  accent:'#ff7351' }, // 7
       { name:'ANNOYED',  eyes:'=  =', mouth:'¬',  accent:'#fb923c' }, // 8
+      { name:'HAMBRE',   eyes:'°  °', mouth:'ω',  accent:'#ffd574' }, // 9
+      { name:'TRISTE',   eyes:'T  T', mouth:'⌢',  accent:'#9492ff' }, // 10
+      { name:'ENFERMO',  eyes:'x  x', mouth:'~',  accent:'#a3e635' }, // 11
+      { name:'R.I.P.',   eyes:'x  x', mouth:'_',  accent:'#555555' }, // 12
     ];
 
     let prevMood = -1;
     let fbTimer  = null;
 
+    function statColor(v) {
+      if (v > 50) return '#6bff8f';
+      if (v > 25) return '#ffd574';
+      return '#ff7351';
+    }
+
+    function formatAge(h) {
+      if (h < 0.1) return 'Recién nacido';
+      if (h < 24)  return `${Math.floor(h)}h`;
+      return `${Math.floor(h / 24)}d ${Math.floor(h % 24)}h`;
+    }
+
     function applyState(s) {
-      const m = MOODS[s.mood] ?? MOODS[0];
-      const a = m.accent;
+      const m   = MOODS[s.mood] ?? MOODS[0];
+      const a   = m.accent;
+      const dead = s.dead ?? false;
 
       // Face
       const eyes  = document.getElementById('eyes');
@@ -204,26 +325,75 @@
       mouth.style.textShadow = `0 0 8px ${a}66`;
 
       // Badge
-      document.getElementById('badge').textContent  = m.name;
-      document.getElementById('badge').style.color  = a;
-      document.getElementById('moodDot').style.background = a;
-      document.querySelector('#screen .absolute.bottom-5').style.borderColor = `${a}33`;
-      document.querySelector('#screen .absolute.bottom-5').style.background  = `${a}0a`;
+      const badge    = document.getElementById('badge');
+      const moodDot  = document.getElementById('moodDot');
+      const badgeWrap = badge.parentElement;
+      badge.textContent = m.name;
+      badge.style.color = a;
+      moodDot.style.background = a;
+      badgeWrap.style.borderColor = `${a}33`;
+      badgeWrap.style.background  = `${a}0a`;
 
       // Screen glow
       document.getElementById('screen').style.boxShadow =
         `inset 0 0 30px ${a}14, 0 0 0 1px ${a}22, 0 0 40px ${a}0a`;
 
-      // Steps
-      document.getElementById('steps').textContent = (s.steps ?? 0).toLocaleString('es');
-
+      // Zzz
       if (s.mood !== prevMood) {
-        // Zzz
         const zzz = document.getElementById('zzz');
         if (s.mood === 1) { zzz.classList.remove('hidden'); zzz.style.color = a; }
         else              { zzz.classList.add('hidden'); }
         prevMood = s.mood;
       }
+
+      // Dead overlay
+      document.getElementById('deadOverlay').style.display = dead ? 'flex' : 'none';
+
+      // Disable care buttons when dead
+      ['btn-feed','btn-play','btn-pet','btn-sleep','btn-medicine','btn-clean',
+       'btn-shake','btn-startle'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = dead;
+      });
+
+      // Stat bars
+      const hunger    = s.hunger    ?? 0;
+      const happiness = s.happiness ?? 0;
+      const energy    = s.energy    ?? 0;
+
+      document.getElementById('hungerVal').textContent    = hunger;
+      document.getElementById('happinessVal').textContent = happiness;
+      document.getElementById('energyVal').textContent    = energy;
+
+      const hBar = document.getElementById('hungerBar');
+      hBar.style.width      = hunger + '%';
+      hBar.style.background = statColor(hunger);
+
+      const haBar = document.getElementById('happinessBar');
+      haBar.style.width      = happiness + '%';
+      haBar.style.background = statColor(happiness);
+
+      const eBar = document.getElementById('energyBar');
+      eBar.style.width      = energy + '%';
+      eBar.style.background = energy > 50 ? '#9492ff' : energy > 25 ? '#ffd574' : '#ff7351';
+
+      // Status badges
+      document.getElementById('poopBadge').style.display = s.needsClean ? 'flex' : 'none';
+      document.getElementById('sickBadge').style.display = s.sick       ? 'flex' : 'none';
+
+      // Highlight medicine / clean buttons when needed
+      const medBtn   = document.getElementById('btn-medicine');
+      const cleanBtn = document.getElementById('btn-clean');
+      medBtn.style.boxShadow   = s.sick       ? '0 0 0 1px #a3e63566' : '';
+      cleanBtn.style.boxShadow = s.needsClean ? '0 0 0 1px #ffd57466' : '';
+
+      // Sleep button toggle
+      document.getElementById('sleepIcon').textContent  = s.sleeping ? '☀️' : '💤';
+      document.getElementById('sleepLabel').textContent = s.sleeping ? 'Despertar' : 'Dormir';
+
+      // Steps & age
+      document.getElementById('steps').textContent = (s.steps ?? 0).toLocaleString('es');
+      document.getElementById('ageDisplay').textContent = formatAge(s.ageHours ?? 0);
     }
 
     function setOnline(online, updatedAt) {
@@ -231,25 +401,27 @@
       const txt = document.getElementById('statusTxt');
       if (online) {
         dot.style.background = '#6bff8f';
-        dot.style.color = '#6bff8f';
+        dot.style.color      = '#6bff8f';
         dot.classList.add('dot-pulse');
         txt.textContent = 'En línea';
         txt.style.color = '#6bff8f';
       } else {
         dot.style.background = '#444';
-        dot.style.color = '#444';
+        dot.style.color      = '#444';
         dot.classList.remove('dot-pulse');
         txt.textContent = 'Sin conexión';
         txt.style.color = '';
       }
       document.getElementById('lastSeen').textContent =
-        updatedAt ? new Date(updatedAt).toLocaleTimeString('es', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '—';
+        updatedAt
+          ? new Date(updatedAt).toLocaleTimeString('es', {hour:'2-digit', minute:'2-digit', second:'2-digit'})
+          : '—';
     }
 
     function feedback(msg, ok) {
       const el = document.getElementById('feedback');
       el.textContent = msg;
-      el.style.color = ok ? '#6bff8f' : '#ff7351';
+      el.style.color   = ok ? '#6bff8f' : '#ff7351';
       el.style.opacity = '1';
       clearTimeout(fbTimer);
       fbTimer = setTimeout(() => { el.style.opacity = '0'; }, 2500);
@@ -268,6 +440,18 @@
       }
     }
 
+    const LABELS = {
+      feed:     '¡Comido! 🍎',
+      play:     '¡A jugar! 🎮',
+      pet:      'Acariciado 🤗',
+      sleep:    'Cambiado 💤',
+      medicine: '¡Curado! 💊',
+      clean:    '¡Limpio! 🧹',
+      shake:    'Agitado 🌀',
+      startle:  '¡Asustado! 💥',
+      restart:  '¡Renacido! ✨',
+    };
+
     async function send(cmd) {
       const btns = document.querySelectorAll('.btn-action');
       btns.forEach(b => b.disabled = true);
@@ -277,11 +461,12 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ command: cmd }),
         });
-        const labels = { pet:'Acariciado', shake:'Agitado', startle:'Asustado', noise:'¡Ruido!' };
-        feedback(res.ok ? `✓ ${labels[cmd] ?? cmd}` : '✗ error', res.ok);
+        feedback(res.ok ? `✓ ${LABELS[cmd] ?? cmd}` : '✗ error', res.ok);
+        if (res.ok) poll(); // refresh inmediato
       } catch {
         feedback('✗ sin red', false);
       } finally {
+        // Re-enable non-dead buttons (poll() will re-apply dead state)
         btns.forEach(b => b.disabled = false);
       }
     }

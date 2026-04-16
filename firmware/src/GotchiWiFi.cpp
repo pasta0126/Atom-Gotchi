@@ -12,7 +12,6 @@ void GotchiWiFi::begin() {
 }
 
 void GotchiWiFi::update() {
-    // Si estamos en proceso de conexión, comprobar si ya conectó o timeout
     if (_connecting) {
         if (WiFi.status() == WL_CONNECTED) {
             _connecting = false;
@@ -25,13 +24,11 @@ void GotchiWiFi::update() {
         return;
     }
 
-    // Si no hay conexión, reintentar
     if (WiFi.status() != WL_CONNECTED) {
         _startConnect();
         return;
     }
 
-    // Polling periódico
     unsigned long now = millis();
     if (now - _lastPoll < POLL_MS) return;
     _lastPoll = now;
@@ -61,10 +58,12 @@ void GotchiWiFi::_pollCommand() {
     if (code == HTTP_CODE_OK) {
         String body = http.getString();
         body.toLowerCase();
-        if      (body.indexOf("pet")     >= 0) _state.pet();
+        // Orden importante: más específicos primero
+        if      (body.indexOf("startle") >= 0) _state.onFall();
+        else if (body.indexOf("feed")    >= 0) _state.pet();
         else if (body.indexOf("shake")   >= 0) _state.onShake(false);
-        else if (body.indexOf("startle") >= 0) _state.onFall();
         else if (body.indexOf("noise")   >= 0) _state.onNoise(600.0f);
+        else if (body.indexOf("pet")     >= 0) _state.pet();
     } else if (code < 0) {
         Serial.printf("[WiFi] pollCommand error: %s\n", http.errorToString(code).c_str());
     }
@@ -74,10 +73,9 @@ void GotchiWiFi::_pollCommand() {
 void GotchiWiFi::_pushState() {
     GotchiStats s = _state.getStats();
 
-    // Construir JSON manualmente — sin dependencias extra
-    String body  = "{\"mood\":"  + String((uint8_t)s.mood)
-                 + ",\"steps\":" + String(s.steps)
-                 + "}";
+    String body = "{\"mood\":"  + String((uint8_t)s.mood)
+                + ",\"steps\":" + String(s.steps)
+                + "}";
 
     WiFiClientSecure client;
     client.setInsecure();
@@ -88,7 +86,34 @@ void GotchiWiFi::_pushState() {
     http.addHeader("Content-Type", "application/json");
 
     int code = http.POST(body);
-    if (code < 0) {
+    if (code == HTTP_CODE_OK) {
+        String resp = http.getString();
+        // Parsear vitals del JSON de respuesta
+        // {"hunger":N,"happiness":N,"energy":N,"sick":bool,"dead":bool,"needsClean":bool,"sleeping":bool}
+        auto getInt = [&](const char* key) -> int {
+            String search = String("\"") + key + "\":";
+            int i = resp.indexOf(search);
+            if (i < 0) return -1;
+            return resp.substring(i + search.length()).toInt();
+        };
+        auto getBool = [&](const char* key) -> bool {
+            String search = String("\"") + key + "\":";
+            int i = resp.indexOf(search);
+            if (i < 0) return false;
+            return resp.substring(i + search.length()).startsWith("true");
+        };
+
+        int hunger    = getInt("hunger");
+        int happiness = getInt("happiness");
+        int energy    = getInt("energy");
+        bool sick     = getBool("sick");
+        bool dead     = getBool("dead");
+        bool sleeping = getBool("sleeping");
+
+        if (hunger >= 0) {
+            _state.setVitals(hunger, happiness, energy, sick, dead, sleeping);
+        }
+    } else if (code < 0) {
         Serial.printf("[WiFi] pushState error: %s\n", http.errorToString(code).c_str());
     }
     http.end();
