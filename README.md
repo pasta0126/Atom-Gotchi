@@ -1,91 +1,167 @@
 # AtomGotchi
 
-A Tamagotchi-style digital companion running on the **M5Stack Atom S3R**, managed from Android via Bluetooth Low Energy.
+A Tamagotchi-style digital companion running on the **M5Stack Atom S3R** (ESP32-S3). The device connects to a local WiFi network, a .NET 8 server manages all vitals and decay, and a browser dashboard lets you care for it from any device on the same network.
 
-The device shows an animated face that reacts to its internal state, the environment (sound, movement, orientation) and commands sent from the phone. It gets hungry, thirsty, tired, scared, dizzy, and happy — and lets you know.
+```
+[Atom S3R]  ──WiFi──▶  POST /api/state        ─┐
+                        GET  /api/command/next  ◀─┤  .NET 8 API + static web UI
+[Browser]   ◀────────  GET  /api/state/current ─┤  (Docker on Mac Mini M1)
+            ─────────▶ POST /api/command        ─┘
+```
 
 ---
 
 ## Hardware
 
-| Component | Spec |
-|---|---|
-| Board | [M5Stack Atom S3R](https://docs.m5stack.com/en/core/AtomS3R) |
-| MCU | ESP32-S3, dual-core Xtensa LX7 @ 240 MHz |
-| Display | GC9107, 128×128 px, TFT color |
-| IMU | BMI270 6-axis (accel + gyro) |
-| Microphone | PDM (GPIO 5/6) |
-| LED | 1× WS2812B RGB |
-| Button | 1× side button |
-| Connectivity | BLE 5.0 (NimBLE) |
+| Component    | Spec                                                         |
+| ------------ | ------------------------------------------------------------ |
+| Board        | [M5Stack Atom S3R](https://docs.m5stack.com/en/core/AtomS3R) |
+| MCU          | ESP32-S3, dual-core Xtensa LX7 @ 240 MHz                     |
+| Display      | GC9107, 128×128 px TFT color                                 |
+| IMU          | BMI270 6-axis (accel + gyro)                                 |
+| Microphone   | PDM (GPIO 5/6)                                               |
+| LED          | 1× WS2812B RGB                                               |
+| Button       | 1× side button                                               |
+| Connectivity | WiFi (802.11 b/g/n)                                          |
 
 ---
 
-## Features
+## Stats
 
-### Firmware
-- **Animated face** via [M5Stack-Avatar](https://github.com/meganetaaan/m5stack-avatar) (local patched copy)  
-  Eyes and mouth react to mood, gaze follows tilt, autonomous saccades, auto-blink
-- **13 moods** with a priority system — the highest-priority active condition wins
-- **Stat system**: hunger, thirst, energy (0–100), step counter
-  - Stats decay primarily from steps walked, secondarily from time
-  - Energy recovers while sleeping (faster at night)
-- **Sensor-driven events**
-  - Step detection from accelerometer
-  - Fall detection (free-fall + impact)
-  - Shake detection (light → dizzy, strong → startled)
-  - Orientation: face-down 30 s → grumpy; face-up 5 min → induced sleep
-  - Sustained loud noise (> 3 s) → annoyed
-  - Inactivity 5 min → sleepy
-  - Sound spikes → eyes dart toward source
-  - IMU tilt → eye direction shift
-- **Button interactions**: 1-5 presses = laughing; mash > 5 = annoyed; very rapid = angry
-- **Night mode**: if the phone sends the current hour (22h–7h) and energy is low → sleep
-- **BLE server** (GATT / NimBLE): notifies state, receives feed/drink/pet commands and phone context
-- **Display style**: black background, white face (manga aesthetic), colored mood icons (♥ 💢 ~~~ Zzz 💧), 0.5 s colored border flash on mood change
+Three vitals live on the server (0–100). The Atom reads them back every 3 s via the WiFi sync.
 
-### Android App
-- Scans and connects to the device automatically
-- Shows a live rendering of the Gotchi face matching the device expression
-- Stat bars (hunger / thirst / energy) with emoji icons
-- Action buttons: Feed 🍔 · Drink 💧 · Pet 🤗
-- Sends phone battery level + current hour and temperature every 60 s
+| Stat            | Decays                                                         | Recovers                                  | Critical threshold                              |
+| --------------- | -------------------------------------------------------------- | ----------------------------------------- | ----------------------------------------------- |
+| **Hunger** 🍎    | −0.5 / min → empty in ~3.3 h                                   | +40 per Feed                              | < 25 → HUNGRY mood; < 10 for 10 min → gets sick |
+| **Happiness** 😊 | −0.33 / min → empty in ~5 h; extra −0.33/min while very hungry | +varies (see commands)                    | < 25 → SAD mood                                 |
+| **Energy** ⚡    | −0.25 / min awake → empty in ~6.7 h                            | +0.80 / min while sleeping → full in ~2 h | —                                               |
+
+---
+
+## Lifecycle
+
+The Gotchi can get sick and die if neglected. All timers run server-side, even when the Atom is offline.
+
+```
+Normal → Pooped → [not cleaned 15 min] → Sick → [no medicine 30 min] → Dead
+Normal → Very hungry (hunger < 10) → [10 min] → Sick → [no medicine 30 min] → Dead
+```
+
+| Event                | Trigger                         | Effect                                    |
+| -------------------- | ------------------------------- | ----------------------------------------- |
+| 💩 Poop               | Every 30–90 min (random)        | Happiness −10; badge appears on dashboard |
+| 🤒 Sick (from poop)   | Poop uncleaned for 15 min       | `sick = true`; SICK mood                  |
+| 🤒 Sick (from hunger) | Hunger < 10 for 10 min          | `sick = true`; SICK mood                  |
+| 💀 Dead               | Sick for 30 min untreated       | DEAD mood; all buttons disabled           |
+| ✨ Restart            | "Reiniciar" button on dashboard | All stats reset to 80                     |
 
 ---
 
 ## Mood System
 
-Priority (highest → lowest):
+The firmware picks the **highest-priority active condition** each tick. Timed moods (`_Until` flags) expire automatically.
 
-| Priority | Mood | Trigger |
-|---|---|---|
-| 1 | **SCARED** | BLE disconnected |
-| 2 | **STARTLED** | Fall or strong shake |
-| 3 | **ANGRY** | Button mashed rapidly |
-| 4 | **ANNOYED** | Sustained noise or too many pets |
-| 5 | **DIZZY** | Moderate sustained rotation |
-| 6 | **LAUGHING** | 1–5 button presses |
-| 7 | **EXCITED** | Energy or hunger just restored |
-| 8 | **SLEEPING** | Low energy at night / induced |
-| 9 | **TIRED** | Energy < 30 % |
-| 10 | **HUNGRY** | Hunger < 25 % |
-| 11 | **THIRSTY** | Thirst < 25 % |
-| 12 | **SAD** | Multiple stats low |
-| 13 | **HAPPY** | Default |
+| Priority | Mood           | Trigger                                          | Duration                         |
+| -------- | -------------- | ------------------------------------------------ | -------------------------------- |
+| 1        | **DEAD** 💀     | dead flag from server                            | permanent until restart          |
+| 2        | **SICK** 🤒     | sick flag from server                            | until medicine given             |
+| 3        | **STARTLED** 😱 | fall or strong shake                             | 4 s (2–3 s if shake)             |
+| 4        | **ANGRY** 😠    | face-down 30 s, or button rage                   | 8 s                              |
+| 5        | **ANNOYED** 😤  | sustained loud noise, or too many pets           | 6 s (3 s tail after noise stops) |
+| 6        | **DIZZY** 😵    | moderate sustained rotation                      | 4 s                              |
+| 7        | **LAUGHING** 😄 | 1–5 button presses or pet command                | 2–2.5 s                          |
+| 8        | **EXCITED** 🌟  | loud noise spike                                 | 1–5 s (scales with volume)       |
+| 9        | **SLEEPING** 💤 | sleep toggle, face-up 5 min, or inactivity 5 min | until woken / energy full        |
+| 10       | **HUNGRY** 😋   | hunger < 25                                      | until fed                        |
+| 11       | **SAD** 😢      | happiness < 25                                   | until happiness rises            |
+| 12       | **BORED** 😑    | no interaction for 3 min                         | until any interaction            |
+| 13       | **HAPPY** 😊    | default                                          | —                                |
 
 ---
 
-## BLE Protocol
+## Sensor Events (Firmware)
 
-Device name: **`AtomGotchi`**  
-Service UUID: `4fafc201-1fb5-459e-8fcc-c5c9c331914b` (base `...9100`)
+The IMU runs at 20 Hz and the microphone at ~3 Hz. Raw sensor data is converted into semantic events that update mood state.
 
-| Characteristic | UUID suffix | Mode | Format |
-|---|---|---|---|
-| State | `...2601` | READ + NOTIFY | `[mood, hunger, thirst, energy, steps_hi, steps_lo, flags]` (7 bytes) |
-| Command | `...2602` | WRITE | `0x01` feed · `0x02` drink · `0x03` pet |
-| Phone battery | `...2603` | WRITE | `[level_0-100, flags]` (bit 0 = charging) |
-| Context | `...2604` | WRITE | `[hour_0-23, temp_celsius_int8]` |
+### IMU — accelerometer
+
+| Event          | Condition                                                                   | Fires                                       |
+| -------------- | --------------------------------------------------------------------------- | ------------------------------------------- |
+| **Fall**       | Accel drops below 0.35 g (free fall), then spikes above 2.5 g within 500 ms | `onFall()` → STARTLED 4 s                   |
+| **Face down**  | Z-axis > 0.82 g for **30 s**                                                | `onFaceDown30s()` → ANGRY 8 s               |
+| **Face up**    | Z-axis < −0.82 g, no movement, for **5 min**                                | `onFaceUp5min()` → induced sleep 10 min     |
+| **Inactivity** | No movement (accel variation < 0.13 g) for **5 min**                        | `onInactivity5min()` → induced sleep 10 min |
+
+### IMU — gyroscope
+
+| Event              | Condition                                | Fires                              |
+| ------------------ | ---------------------------------------- | ---------------------------------- |
+| **Shake (light)**  | Gyro ≥ 60 °/s sustained for 500 ms       | wakes from sleep                   |
+| **Shake (strong)** | Gyro ≥ 260 °/s sustained for 500 ms      | `onShake(strong)` → STARTLED 2–3 s |
+| **Dizzy**          | Gyro 150–260 °/s sustained for **1.2 s** | `onDizzy()` → DIZZY 4 s            |
+
+### Microphone
+
+| Event               | Condition                          | Fires                                         |
+| ------------------- | ---------------------------------- | --------------------------------------------- |
+| **Noise spike**     | RMS > 400 (sampled every 300 ms)   | `onNoise()` → EXCITED 1–5 s (scales with RMS) |
+| **Sustained noise** | RMS > 550 for **3 s** continuously | `onSustainedNoise(true)` → ANNOYED 6 s        |
+| **Noise stops**     | RMS drops below threshold          | `onSustainedNoise(false)` → ANNOYED fades 3 s |
+
+### Button (physical, side of device)
+
+| Interaction | Condition                  | Effect                           |
+| ----------- | -------------------------- | -------------------------------- |
+| **Laugh**   | 1–5 presses within 8 s     | LAUGHING 2.5 s                   |
+| **Annoyed** | More than 5 presses in 8 s | ANNOYED 5 s                      |
+| **Rage**    | ≥ 5 presses within 2 s     | ANGRY 8 s (overrides everything) |
+
+---
+
+## Web Dashboard Commands
+
+Open `http://<server-ip>:5000` in a browser. The dashboard polls state every 3 s.
+
+### Care buttons
+
+| Button                   | Stat effect (immediate, server-side)              | Animation on device |
+| ------------------------ | ------------------------------------------------- | ------------------- |
+| 🍎 **Alimentar**          | Hunger +40                                        | "feed"              |
+| 🎮 **Jugar**              | Happiness +30, Energy −10                         | LAUGHING 2 s        |
+| 🤗 **Acariciar**          | Happiness +15                                     | LAUGHING 2 s        |
+| 💤 **Dormir / Despertar** | Toggles sleeping (energy recovers while on)       | —                   |
+| 💊 **Medicina**           | Clears sick flag, Happiness +10                   | LAUGHING 2 s        |
+| 🧹 **Limpiar**            | Clears poop flag, Happiness +5, resets poop timer | LAUGHING 2 s        |
+
+### Fun buttons
+
+| Button        | Effect                              |
+| ------------- | ----------------------------------- |
+| 🌀 **Agitar**  | Triggers `onShake(false)` on device |
+| 💥 **Asustar** | Triggers `onFall()` → STARTLED 4 s  |
+
+### Dashboard indicators
+
+- **Dot / status bar** — green pulse = Atom connected (last update < 12 s ago)
+- **Last seen** — timestamp of last sync from device
+- **Age** — time since last restart
+- **💩 badge** — poop pending; Limpiar button glows
+- **🤒 badge** — sick; Medicina button glows
+- **Stat bars** — green > 50, yellow 26–50, red ≤ 25
+
+---
+
+## WiFi Protocol
+
+The Atom syncs with the server every **3 s** (non-blocking state machine):
+
+| Direction     | Endpoint                 | Payload                                                                                           |
+| ------------- | ------------------------ | ------------------------------------------------------------------------------------------------- |
+| Atom → server | `POST /api/state`        | `{"mood": N}`                                                                                     |
+| Server → Atom | Response to POST         | `{"hunger":N,"happiness":N,"energy":N,"sick":bool,"dead":bool,"needsClean":bool,"sleeping":bool}` |
+| Atom → server | `GET /api/command/next`  | server returns `"feed"` / `"pet"` / `"shake"` / `"startle"` / `""` and clears it                  |
+| Web → server  | `GET /api/state/current` | full state JSON + `updatedAt` + `ageHours`                                                        |
+| Web → server  | `POST /api/command`      | `{"command":"feed"}` (or play/pet/sleep/medicine/clean/shake/startle/restart)                     |
 
 ---
 
@@ -93,25 +169,23 @@ Service UUID: `4fafc201-1fb5-459e-8fcc-c5c9c331914b` (base `...9100`)
 
 ```
 AtomGotchi/
-├── firmware/               # PlatformIO project (C++ / Arduino)
+├── firmware/                       # PlatformIO project (C++ / Arduino)
 │   ├── src/
-│   │   ├── main.cpp
-│   │   ├── GotchiState.h/cpp      # Mood & stat logic
-│   │   ├── GotchiDisplay.h/cpp    # Avatar rendering, LED
-│   │   ├── GotchiSensors.h/cpp    # IMU, mic, button
-│   │   └── GotchiBLE.h/cpp        # GATT server
+│   │   ├── main.cpp                # Main loop ~50 Hz, core 1
+│   │   ├── GotchiState.h/cpp       # Mood logic, sensor event handlers
+│   │   ├── GotchiDisplay.h/cpp     # Avatar rendering, LED animations
+│   │   ├── GotchiSensors.h/cpp     # IMU (20 Hz) + mic (~3 Hz) + button
+│   │   ├── GotchiWiFi.h/cpp        # Non-blocking WiFi state machine
+│   │   └── credentials.h           # WiFi SSID/pass + API_URL (gitignored)
 │   ├── lib/
-│   │   └── M5Stack-Avatar/        # Patched local copy of the avatar library
+│   │   └── M5Stack-Avatar/         # Patched local copy (do not replace)
 │   └── platformio.ini
-└── app/                    # Flutter Android app
-    └── lib/
-        ├── models/gotchi_state.dart
-        ├── services/ble_service.dart
-        ├── services/battery_service.dart
-        ├── screens/home_screen.dart
-        └── widgets/
-            ├── gotchi_face.dart
-            └── stat_bar.dart
+└── server/                         # .NET 8 Minimal API
+    ├── Program.cs                  # 4 endpoints
+    ├── GotchiStore.cs              # Singleton: vitals, decay timer, command queue
+    ├── Models.cs                   # DTOs
+    ├── wwwroot/index.html          # SPA dashboard (vanilla JS + Tailwind)
+    └── docker-compose.yml
 ```
 
 ---
@@ -120,7 +194,16 @@ AtomGotchi/
 
 ### Prerequisites
 - [PlatformIO](https://platformio.org/) (CLI or VS Code extension)
-- USB cable to Atom S3R
+
+### First-time setup
+
+Copy `firmware/src/credentials.h.example` → `firmware/src/credentials.h` and fill in:
+
+```cpp
+#define WIFI_SSID "your-network"
+#define WIFI_PASS "your-password"
+#define API_URL   "http://192.168.1.X:5000"   // no trailing slash
+```
 
 ```bash
 cd firmware
@@ -128,53 +211,46 @@ cd firmware
 # Build
 pio run -e m5stack-atoms3r
 
-# Flash  (put Atom in download mode: hold button while connecting USB)
+# Flash  (hold button while plugging USB to enter download mode)
 pio run -e m5stack-atoms3r -t upload
 
 # Serial monitor
 pio device monitor --baud 115200
 ```
 
-> The Avatar library lives in `firmware/lib/M5Stack-Avatar/` and contains custom patches
-> for the 128×128 display. Do **not** replace it with the upstream version.
+> `firmware/lib/M5Stack-Avatar/` is a patched copy tuned for the 128×128 display.
+> **Do not replace it with the upstream version** — it will crash or render incorrectly.
 
 ---
 
-## Building the Android App
+## Running the Server
 
-### Prerequisites
-- [Flutter SDK](https://flutter.dev/docs/get-started/install) ≥ 3.x
-- Android device with Bluetooth LE (API 21+)
-- USB debugging enabled on the device
+### Local (.NET 8 SDK required)
 
 ```bash
-cd app
-
-# Install dependencies
-flutter pub get
-
-# Run on connected device
-flutter run
-
-# Build release APK
-flutter build apk --release
-# Output: app/build/outputs/flutter-apk/app-release.apk
+cd server
+dotnet run
+# Dashboard at http://localhost:5000
 ```
 
-### Required Android permissions
-Declared in `AndroidManifest.xml` — granted at runtime by the app:
-- `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT` (Android 12+)
-- `ACCESS_FINE_LOCATION` (required for BLE scan on older Android)
+### Docker (Mac Mini M1)
+
+```bash
+cd server
+docker compose up --build -d
+docker compose logs -f
+# Dashboard at http://<mac-mini-ip>:5000
+```
 
 ---
 
 ## Avatar Library Patches
 
-The `firmware/lib/M5Stack-Avatar/` copy contains the following changes vs upstream:
+`firmware/lib/M5Stack-Avatar/` contains the following changes vs upstream:
 
-| File | Change |
-|---|---|
-| `Face.cpp` | Fixed uninitialized `Balloon`, `Effect`, `BatteryIcon` pointers; added `COLOR_BORDER` bottom strip |
-| `Avatar.cpp` | Increased `drawLoop` stack from 2048 → 8192 bytes |
-| `Effect.h` | Scaled icon positions from 320×240 → 128×128; icons use `COLOR_SECONDARY` (mood accent color) |
-| `ColorPalette.h/cpp` | Added `COLOR_BORDER` key; fixed `set()` to handle new keys without UB |
+| File                 | Change                                                                                             |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| `Face.cpp`           | Fixed uninitialized `Balloon`, `Effect`, `BatteryIcon` pointers; added `COLOR_BORDER` bottom strip |
+| `Avatar.cpp`         | Increased `drawLoop` stack 2048 → 8192 bytes                                                       |
+| `Effect.h`           | Scaled icon positions from 320×240 → 128×128; icons use `COLOR_SECONDARY`                          |
+| `ColorPalette.h/cpp` | Added `COLOR_BORDER` key; fixed `set()` bounds safety                                              |
