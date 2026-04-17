@@ -7,6 +7,7 @@ public sealed class GotchiStore : IDisposable
     private double   _happiness       = 80;
     private double   _energy          = 80;
     private bool     _sleeping        = false;
+    private bool     _nightSleep      = false;  // forzado por horario nocturno
     private bool     _sick            = false;
     private bool     _dead            = false;
     private bool     _needsClean      = false;
@@ -18,6 +19,9 @@ public sealed class GotchiStore : IDisposable
     private DateTime _sickAt          = DateTime.MinValue;
     private double   _nextPoopMinutes;
 
+    // ── Personalidad ──────────────────────────────────────────────────────────
+    private GotchiPersonality _personality = GotchiPersonality.Feliz;
+
     // ── Device state ──────────────────────────────────────────────────────────
     private int      _mood      = 0;
     private DateTime _updatedAt = DateTime.MinValue;
@@ -28,11 +32,24 @@ public sealed class GotchiStore : IDisposable
     private readonly object _lock = new();
     private readonly System.Threading.Timer _decayTimer;
 
-    // ── Decay constants ───────────────────────────────────────────────────────
-    private const double HungerDecayPerMin    = 0.50;  // 100→0 en ~3.3h
-    private const double HappinessDecayPerMin = 0.33;  // 100→0 en ~5h
-    private const double EnergyDecayPerMin    = 0.25;  // 100→0 en ~6.7h despierto
-    private const double EnergyRecoverPerMin  = 0.80;  // duerme: lleno en ~2h
+    // ── Timezone (Spain) ──────────────────────────────────────────────────────
+    private static readonly TimeZoneInfo _tz = GetTz();
+
+    private static TimeZoneInfo GetTz()
+    {
+        try  { return TimeZoneInfo.FindSystemTimeZoneById("Europe/Madrid"); }
+        catch { return TimeZoneInfo.FindSystemTimeZoneById("Romance Standard Time"); }
+    }
+
+    // Horas de sueño nocturno (hora local)
+    private const int NightStart = 22;
+    private const int NightEnd   = 8;
+
+    // ── Decay constants (base) ────────────────────────────────────────────────
+    private const double HungerDecayPerMin    = 0.50;
+    private const double HappinessDecayPerMin = 0.33;
+    private const double EnergyDecayPerMin    = 0.25;
+    private const double EnergyRecoverPerMin  = 0.80;
     private const double PoopMinMin           = 30.0;
     private const double PoopMaxMin           = 90.0;
     private const double SickAfterPoopMin     = 15.0;
@@ -44,7 +61,6 @@ public sealed class GotchiStore : IDisposable
     public GotchiStore()
     {
         _nextPoopMinutes = RandPoopInterval();
-        // Decay autónomo cada 10 s aunque el Atom esté offline
         _decayTimer = new System.Threading.Timer(
             _ => { lock (_lock) _Decay(); }, null,
             TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
@@ -64,7 +80,6 @@ public sealed class GotchiStore : IDisposable
         }
     }
 
-    /// <summary>Llamado por el Atom cada 3 s. Ejecuta decay y devuelve vitals actuales.</summary>
     public VitalsDto UpdateState(DeviceStateDto dto)
     {
         lock (_lock)
@@ -76,40 +91,43 @@ public sealed class GotchiStore : IDisposable
         }
     }
 
-    /// <summary>Ejecuta un comando de la web: aplica efecto en vitals y encola animación para el Atom.</summary>
     public void ExecuteCommand(string cmd)
     {
         lock (_lock)
         {
             if (_dead && cmd != "restart") return;
 
+            double bonus = _personality == GotchiPersonality.Activo ? 1.20 : 1.0;
+
             switch (cmd)
             {
                 case "feed":
-                    _hunger       = Math.Min(100, _hunger + 40);
+                    double feedBonus = _personality == GotchiPersonality.Gloton ? 1.10 : 1.0;
+                    _hunger       = Math.Min(100, _hunger + 40 * bonus * feedBonus);
                     _veryHungryAt = DateTime.MinValue;
                     _pendingCommand = "feed";
                     break;
 
                 case "play":
-                    _happiness = Math.Min(100, _happiness + 30);
+                    _happiness = Math.Min(100, _happiness + 30 * bonus);
                     _energy    = Math.Max(0,   _energy    - 10);
                     _pendingCommand = "pet";
                     break;
 
                 case "pet":
-                    _happiness = Math.Min(100, _happiness + 15);
+                    _happiness = Math.Min(100, _happiness + 15 * bonus);
                     _pendingCommand = "pet";
                     break;
 
                 case "sleep":
-                    _sleeping = !_sleeping;
+                    if (!_nightSleep)  // el sueño nocturno no se puede desactivar manualmente
+                        _sleeping = !_sleeping;
                     break;
 
                 case "medicine":
                     _sick      = false;
                     _sickAt    = DateTime.MinValue;
-                    _happiness = Math.Min(100, _happiness + 10);
+                    _happiness = Math.Min(100, _happiness + 10 * bonus);
                     _pendingCommand = "pet";
                     break;
 
@@ -117,7 +135,7 @@ public sealed class GotchiStore : IDisposable
                     _needsClean      = false;
                     _poopedAt        = DateTime.MinValue;
                     _nextPoopMinutes = RandPoopInterval();
-                    _happiness       = Math.Min(100, _happiness + 5);
+                    _happiness       = Math.Min(100, _happiness + 5 * bonus);
                     _pendingCommand  = "pet";
                     break;
 
@@ -140,7 +158,6 @@ public sealed class GotchiStore : IDisposable
         }
     }
 
-    /// <summary>Devuelve el comando pendiente para el Atom y lo borra.</summary>
     public string? ConsumeCommand()
     {
         lock (_lock)
@@ -148,6 +165,21 @@ public sealed class GotchiStore : IDisposable
             var cmd = _pendingCommand;
             _pendingCommand = null;
             return cmd;
+        }
+    }
+
+    public void SetPersonality(string type)
+    {
+        lock (_lock)
+        {
+            _personality = type.ToLowerInvariant() switch
+            {
+                "feliz"    => GotchiPersonality.Feliz,
+                "gloton"   => GotchiPersonality.Gloton,
+                "dormilon" => GotchiPersonality.Dormilon,
+                "activo"   => GotchiPersonality.Activo,
+                _          => _personality
+            };
         }
     }
 
@@ -161,24 +193,48 @@ public sealed class GotchiStore : IDisposable
 
         var now     = DateTime.UtcNow;
         var elapsed = (now - _lastDecay).TotalMinutes;
-        if (elapsed < 1.0 / 60.0) return; // menos de 1 segundo, skip
+        if (elapsed < 1.0 / 60.0) return;
         _lastDecay = now;
 
-        // Stats básicos
-        _hunger    = Math.Max(0, _hunger    - HungerDecayPerMin    * elapsed);
-        _happiness = Math.Max(0, _happiness - HappinessDecayPerMin * elapsed);
+        // ── Sueño nocturno automático ─────────────────────────────────────────
+        var localHour = TimeZoneInfo.ConvertTimeFromUtc(now, _tz).Hour;
+        bool isNight  = localHour >= NightStart || localHour < NightEnd;
 
-        // Energía: recupera durmiendo, gasta despierto
+        if (isNight && !_nightSleep)
+        {
+            _nightSleep = true;
+            _sleeping   = true;
+        }
+        else if (!isNight && _nightSleep)
+        {
+            _nightSleep = false;
+            // Deja _sleeping activo hasta que la energía se recupere
+        }
+
+        // ── Multiplicadores de personalidad ───────────────────────────────────
+        double hungerMult    = _personality == GotchiPersonality.Gloton   ? 1.60 : 1.0;
+        double happinessMult = _personality == GotchiPersonality.Feliz     ? 0.60 : 1.0;
+        double energyMult    = _personality == GotchiPersonality.Dormilon  ? 1.50 : 1.0;
+        if (_personality == GotchiPersonality.Activo)
+        {
+            hungerMult    *= 1.25;
+            happinessMult *= 1.25;
+            energyMult    *= 1.25;
+        }
+
+        // ── Stats básicos ─────────────────────────────────────────────────────
+        _hunger    = Math.Max(0, _hunger    - HungerDecayPerMin    * hungerMult    * elapsed);
+        _happiness = Math.Max(0, _happiness - HappinessDecayPerMin * happinessMult * elapsed);
+
+        double recoverMult = _personality == GotchiPersonality.Dormilon ? 1.30 : 1.0;
         if (_sleeping)
-            _energy = Math.Min(100, _energy + EnergyRecoverPerMin * elapsed);
+            _energy = Math.Min(100, _energy + EnergyRecoverPerMin * recoverMult * elapsed);
         else
-            _energy = Math.Max(0, _energy - EnergyDecayPerMin * elapsed);
+            _energy = Math.Max(0, _energy - EnergyDecayPerMin * energyMult * elapsed);
 
-        // Felicidad cae extra cuando tiene mucha hambre
         if (_hunger < 25)
             _happiness = Math.Max(0, _happiness - HappinessDecayPerMin * elapsed);
 
-        // Despertarse solo cuando energía llena
         if (_sleeping && _energy >= 100) _sleeping = false;
 
         // ── Caca ──────────────────────────────────────────────────────────────
@@ -193,7 +249,7 @@ public sealed class GotchiStore : IDisposable
             }
         }
 
-        // ── Rastrear hambre extrema ───────────────────────────────────────────
+        // ── Hambre extrema ────────────────────────────────────────────────────
         if (_hunger < 10)
         {
             if (_veryHungryAt == DateTime.MinValue) _veryHungryAt = now;
@@ -204,13 +260,14 @@ public sealed class GotchiStore : IDisposable
         }
 
         // ── Enfermar ──────────────────────────────────────────────────────────
+        double sickTimeMult = _personality == GotchiPersonality.Activo ? 0.7 : 1.0;
         if (!_sick)
         {
             bool fromPoop   = _needsClean
                               && _poopedAt != DateTime.MinValue
-                              && (now - _poopedAt).TotalMinutes > SickAfterPoopMin;
+                              && (now - _poopedAt).TotalMinutes > SickAfterPoopMin * sickTimeMult;
             bool fromHunger = _veryHungryAt != DateTime.MinValue
-                              && (now - _veryHungryAt).TotalMinutes > SickAfterHungryMin;
+                              && (now - _veryHungryAt).TotalMinutes > SickAfterHungryMin * sickTimeMult;
             if (fromPoop || fromHunger)
             {
                 _sick   = true;
@@ -218,8 +275,14 @@ public sealed class GotchiStore : IDisposable
             }
         }
 
-        // ── Morir ─────────────────────────────────────────────────────────────
-        if (_sick && _sickAt != DateTime.MinValue
+        // ── Pausar timer de muerte mientras duerme ───────────────────────────
+        if (_sick && _sleeping && _sickAt != DateTime.MinValue)
+        {
+            _sickAt = _sickAt.Add(TimeSpan.FromMinutes(elapsed));
+        }
+
+        // ── Morir (solo despierto) ────────────────────────────────────────────
+        if (_sick && !_sleeping && _sickAt != DateTime.MinValue
             && (now - _sickAt).TotalMinutes > DeadAfterSickMin)
         {
             _dead = true;
@@ -232,6 +295,7 @@ public sealed class GotchiStore : IDisposable
         _happiness       = 80;
         _energy          = 80;
         _sleeping        = false;
+        _nightSleep      = false;
         _sick            = false;
         _dead            = false;
         _needsClean      = false;
@@ -243,6 +307,7 @@ public sealed class GotchiStore : IDisposable
         _nextPoopMinutes = RandPoopInterval();
         _mood            = 0;
         _pendingCommand  = null;
+        // _personality se mantiene al reiniciar
     }
 
     private VitalsDto _BuildVitals() => new(
@@ -254,7 +319,8 @@ public sealed class GotchiStore : IDisposable
         (int)_hunger, (int)_happiness, (int)_energy,
         _sick, _dead, _needsClean, _sleeping,
         (DateTime.UtcNow - _bornAt).TotalHours,
-        _updatedAt);
+        _updatedAt,
+        _personality);
 
     private static double RandPoopInterval() =>
         PoopMinMin + Random.Shared.NextDouble() * (PoopMaxMin - PoopMinMin);

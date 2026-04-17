@@ -49,12 +49,16 @@
       background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
       opacity: 0.03;
     }
+
+    /* ── ZZZ flotante ──────────────────────────────────────────────── */
     @keyframes floatUp {
-      0%   { transform: translateY(0)    scale(1);    opacity: 0.5; }
-      50%  { transform: translateY(-8px) scale(1.15); opacity: 1;   }
-      100% { transform: translateY(0)    scale(1);    opacity: 0.5; }
+      0%   { transform: translateY(0)    scale(1);    opacity: 0.4; }
+      50%  { transform: translateY(-10px) scale(1.2); opacity: 1;   }
+      100% { transform: translateY(0)    scale(1);    opacity: 0.4; }
     }
     .zzz { animation: floatUp 2.4s ease-in-out infinite; }
+
+    /* ── Indicadores ───────────────────────────────────────────────── */
     @keyframes pulse-dot {
       0%,100% { box-shadow: 0 0 4px 1px currentColor; opacity: 1; }
       50%      { box-shadow: 0 0 10px 3px currentColor; opacity: 0.7; }
@@ -62,15 +66,79 @@
     .dot-pulse { animation: pulse-dot 1.8s ease-in-out infinite; }
     @keyframes pulse-badge {
       0%,100% { opacity: 1; }
-      50%      { opacity: 0.5; }
+      50%      { opacity: 0.45; }
     }
     .badge-pulse { animation: pulse-badge 1.2s ease-in-out infinite; }
+
+    /* ── Animaciones de cara por mood ──────────────────────────────── */
+    @keyframes mood-bob {
+      0%,100% { transform: translateY(0); }
+      50%     { transform: translateY(-7px); }
+    }
+    @keyframes mood-bounce {
+      0%,100% { transform: translateY(0) scale(1); }
+      30%     { transform: translateY(-14px) scale(1.1); }
+      65%     { transform: translateY(-4px) scale(1.02); }
+    }
+    @keyframes mood-shake {
+      0%,100% { transform: translateX(0) rotate(0deg); }
+      20%     { transform: translateX(-6px) rotate(-4deg); }
+      50%     { transform: translateX(6px)  rotate(4deg); }
+      80%     { transform: translateX(-3px) rotate(-2deg); }
+    }
+    @keyframes mood-wobble {
+      0%,100% { transform: rotate(0deg) translateX(0); }
+      25%     { transform: rotate(-5deg) translateX(-2px); }
+      75%     { transform: rotate(5deg)  translateX(2px); }
+    }
+    @keyframes mood-dizzy {
+      0%      { transform: rotate(0deg)   scale(1); }
+      33%     { transform: rotate(10deg)  scale(0.94); }
+      66%     { transform: rotate(-10deg) scale(1.06); }
+      100%    { transform: rotate(0deg)   scale(1); }
+    }
+    @keyframes mood-breathe {
+      0%,100% { opacity: 0.5; transform: scale(0.95); }
+      50%     { opacity: 1;   transform: scale(1.04); }
+    }
+    @keyframes mood-droop {
+      0%,100% { transform: translateY(0) scale(1); }
+      50%     { transform: translateY(5px) scale(0.96); }
+    }
+    @keyframes mood-startle {
+      0%   { transform: scale(1); }
+      15%  { transform: scale(1.3); }
+      30%  { transform: scale(0.9); }
+      55%  { transform: scale(1.12); }
+      100% { transform: scale(1); }
+    }
+    @keyframes mood-sick {
+      0%,100% { transform: rotate(0deg) scale(1); opacity: 1; }
+      30%     { transform: rotate(-3deg) scale(0.96); opacity: 0.8; }
+      70%     { transform: rotate(3deg)  scale(1.04); opacity: 0.9; }
+    }
+
+    .face-bob          { animation: mood-bob      2.4s ease-in-out infinite; }
+    .face-bounce       { animation: mood-bounce   0.58s ease-in-out infinite; }
+    .face-bounce-fast  { animation: mood-bounce   0.38s ease-in-out infinite; }
+    .face-shake        { animation: mood-shake    0.36s ease-in-out infinite; }
+    .face-wobble       { animation: mood-wobble   0.9s  ease-in-out infinite; }
+    .face-dizzy        { animation: mood-dizzy    1.1s  ease-in-out infinite; }
+    .face-breathe      { animation: mood-breathe  3.6s  ease-in-out infinite; }
+    .face-droop        { animation: mood-droop    3s    ease-in-out infinite; }
+    .face-startle      { animation: mood-startle  0.4s  ease-in-out 4; }
+    .face-sick         { animation: mood-sick     1.5s  ease-in-out infinite; }
+    .face-dead         { opacity: 0.4; filter: grayscale(1) brightness(0.5); }
+
     body { min-height: 100dvh; }
     .btn-action {
       transition: background 0.15s, transform 0.1s, color 0.15s, box-shadow 0.15s;
     }
     .btn-action:active:not(:disabled) { transform: scale(0.93); }
     .btn-action:disabled { opacity: 0.35; cursor: not-allowed; }
+    .personality-btn {
+      transition: box-shadow 0.25s, color 0.25s, background 0.25s;
+    }
   </style>
 </head>
 <body class="bg-[#0a0a0a] font-body text-on-surface flex flex-col items-center selection:bg-primary/30">
@@ -97,8 +165,8 @@
 
     <!-- DEVICE SCREEN -->
     <div id="screen"
-         class="w-full aspect-square max-w-xs bg-surface-container-lowest rounded-2xl relative overflow-hidden transition-all duration-500"
-         style="box-shadow: inset 0 0 30px rgba(107,255,143,0.08), 0 0 0 1px rgba(107,255,143,0.15);">
+         class="w-full aspect-square max-w-xs rounded-2xl relative overflow-hidden transition-all duration-700"
+         style="background:#000; box-shadow: inset 0 0 30px rgba(107,255,143,0.08), 0 0 0 1px rgba(107,255,143,0.15);">
 
       <div class="absolute inset-0 scanline pointer-events-none z-10"></div>
 
@@ -107,10 +175,10 @@
         <!-- Zzz (sleeping) -->
         <div id="zzz" class="hidden absolute top-4 right-5 text-sm font-headline zzz" style="color:#9492ff;">Zzz</div>
 
-        <!-- ASCII Face -->
-        <div class="font-mono text-center select-none leading-tight" style="letter-spacing:0.25em;">
-          <div id="eyes"  class="text-5xl transition-all duration-500" style="color:#6bff8f; text-shadow: 0 0 12px currentColor;">◕  ◕</div>
-          <div id="mouth" class="text-3xl mt-1 transition-all duration-500" style="color:#6bff8f; text-shadow: 0 0 8px currentColor;">‿</div>
+        <!-- Face -->
+        <div id="faceWrap" class="font-mono text-center select-none leading-none face-bob">
+          <div id="eyes"  class="text-6xl transition-all duration-500" style="color:#6bff8f; text-shadow: 0 0 14px currentColor; letter-spacing:0.2em;">◕  ◕</div>
+          <div id="mouth" class="text-4xl mt-3 transition-all duration-500" style="color:#6bff8f; text-shadow: 0 0 10px currentColor; letter-spacing:0.1em;">‿</div>
         </div>
 
         <!-- Mood badge -->
@@ -122,8 +190,8 @@
 
         <!-- Dead overlay -->
         <div id="deadOverlay" class="hidden absolute inset-0 flex flex-col items-center justify-center gap-3 z-20 rounded-2xl"
-             style="background: rgba(0,0,0,0.88);">
-          <div class="text-5xl">💀</div>
+             style="background: rgba(0,0,0,0.90);">
+          <div class="text-6xl">💀</div>
           <div class="font-headline font-bold tracking-widest text-sm text-on-surface-variant">GAME OVER</div>
           <button onclick="send('restart')"
                   class="mt-1 px-6 py-2 rounded-full font-headline text-[11px] font-bold tracking-widest
@@ -136,7 +204,6 @@
 
     <!-- STAT BARS -->
     <div class="w-full max-w-xs space-y-2.5">
-      <!-- Hunger -->
       <div class="flex items-center gap-3">
         <span class="text-lg w-6 text-center">🍎</span>
         <div class="flex-1">
@@ -149,7 +216,6 @@
           </div>
         </div>
       </div>
-      <!-- Happiness -->
       <div class="flex items-center gap-3">
         <span class="text-lg w-6 text-center">😊</span>
         <div class="flex-1">
@@ -162,7 +228,6 @@
           </div>
         </div>
       </div>
-      <!-- Energy -->
       <div class="flex items-center gap-3">
         <span class="text-lg w-6 text-center">⚡</span>
         <div class="flex-1">
@@ -177,6 +242,44 @@
       </div>
     </div>
 
+    <!-- PERSONALIDAD -->
+    <div class="w-full max-w-xs">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-[9px] font-headline uppercase tracking-widest text-on-surface-variant">Personalidad</span>
+        <span id="personalityName" class="text-[9px] font-headline ml-1" style="color:#6bff8f;">—</span>
+      </div>
+      <div class="grid grid-cols-4 gap-1.5">
+        <button onclick="setPersonality('feliz')" id="p-0"
+                class="personality-btn btn-action flex flex-col items-center gap-1 py-2.5 rounded-xl
+                       ring-1 ring-white/5 bg-surface-container
+                       text-[10px] font-headline text-on-surface-variant
+                       hover:ring-primary/40 hover:text-primary hover:bg-surface-container-high">
+          <span class="text-base">😊</span><span>Feliz</span>
+        </button>
+        <button onclick="setPersonality('gloton')" id="p-1"
+                class="personality-btn btn-action flex flex-col items-center gap-1 py-2.5 rounded-xl
+                       ring-1 ring-white/5 bg-surface-container
+                       text-[10px] font-headline text-on-surface-variant
+                       hover:ring-tertiary/40 hover:text-tertiary hover:bg-surface-container-high">
+          <span class="text-base">🍔</span><span>Glotón</span>
+        </button>
+        <button onclick="setPersonality('dormilon')" id="p-2"
+                class="personality-btn btn-action flex flex-col items-center gap-1 py-2.5 rounded-xl
+                       ring-1 ring-white/5 bg-surface-container
+                       text-[10px] font-headline text-on-surface-variant
+                       hover:ring-secondary/40 hover:text-secondary hover:bg-surface-container-high">
+          <span class="text-base">😴</span><span>Dormilón</span>
+        </button>
+        <button onclick="setPersonality('activo')" id="p-3"
+                class="personality-btn btn-action flex flex-col items-center gap-1 py-2.5 rounded-xl
+                       ring-1 ring-white/5 bg-surface-container
+                       text-[10px] font-headline text-on-surface-variant
+                       hover:ring-error/40 hover:text-error hover:bg-surface-container-high">
+          <span class="text-base">⚡</span><span>Activo</span>
+        </button>
+      </div>
+    </div>
+
     <!-- STATUS ROW (poop · sick · age) -->
     <div class="flex items-center gap-2 w-full max-w-xs">
       <div id="poopBadge" style="display:none"
@@ -188,6 +291,11 @@
            class="badge-pulse flex items-center gap-1.5 px-2.5 py-1 rounded-full ring-1 ring-white/10 bg-surface-container-high text-xs">
         <span>🤒</span>
         <span class="font-headline text-[9px] uppercase tracking-widest text-on-surface-variant">Medicina</span>
+      </div>
+      <div id="nightBadge" style="display:none"
+           class="flex items-center gap-1.5 px-2.5 py-1 rounded-full ring-1 ring-white/10 bg-surface-container-high text-xs">
+        <span>🌙</span>
+        <span class="font-headline text-[9px] uppercase tracking-widest text-on-surface-variant">Noche</span>
       </div>
       <span id="ageDisplay" class="text-[9px] font-headline text-on-surface-variant ml-auto">—</span>
     </div>
@@ -266,28 +374,35 @@
 
     </div>
 
-
   </main>
 
   <script>
     const MOODS = [
-      { name:'HAPPY',    eyes:'◕  ◕', mouth:'‿',  accent:'#6bff8f' }, // 0
-      { name:'SLEEPING', eyes:'─  ─', mouth:'‿',  accent:'#9492ff' }, // 1
-      { name:'BORED',    eyes:'·  ·', mouth:'⌢',  accent:'#6366f1' }, // 2
-      { name:'DIZZY',    eyes:'@  @', mouth:'~',  accent:'#c084fc' }, // 3
-      { name:'EXCITED',  eyes:'★  ★', mouth:'D',  accent:'#ffd574' }, // 4
-      { name:'LAUGHING', eyes:'^  ^', mouth:'D',  accent:'#6bff8f' }, // 5
-      { name:'ANGRY',    eyes:'>  <', mouth:'∧',  accent:'#ff7351' }, // 6
-      { name:'STARTLED', eyes:'O  O', mouth:'o',  accent:'#ff7351' }, // 7
-      { name:'ANNOYED',  eyes:'=  =', mouth:'¬',  accent:'#fb923c' }, // 8
-      { name:'HAMBRE',   eyes:'°  °', mouth:'ω',  accent:'#ffd574' }, // 9
-      { name:'TRISTE',   eyes:'T  T', mouth:'⌢',  accent:'#9492ff' }, // 10
-      { name:'ENFERMO',  eyes:'x  x', mouth:'~',  accent:'#a3e635' }, // 11
-      { name:'R.I.P.',   eyes:'x  x', mouth:'_',  accent:'#555555' }, // 12
+      { name:'FELIZ',      eyes:'◕  ◕', mouth:'‿',  accent:'#6bff8f', cls:'face-bob'        }, // 0
+      { name:'DURMIENDO',  eyes:'─  ─', mouth:'‿',  accent:'#9492ff', cls:'face-breathe'    }, // 1
+      { name:'ABURRIDO',   eyes:'·  ·', mouth:'⌢', accent:'#6366f1', cls:'face-droop'       }, // 2
+      { name:'MAREADO',    eyes:'@  @', mouth:'~',  accent:'#c084fc', cls:'face-dizzy'       }, // 3
+      { name:'EMOCIONADO', eyes:'★  ★', mouth:'▽',  accent:'#ffd574', cls:'face-bounce'      }, // 4
+      { name:'RIENDO',     eyes:'^  ^', mouth:'▽',  accent:'#6bff8f', cls:'face-bounce-fast' }, // 5
+      { name:'ENFADADO',   eyes:'>  <', mouth:'∧',  accent:'#ff7351', cls:'face-shake'       }, // 6
+      { name:'ASUSTADO',   eyes:'O  O', mouth:'o',  accent:'#ff7351', cls:'face-startle'     }, // 7
+      { name:'MOLESTO',    eyes:'=  =', mouth:'¬',  accent:'#fb923c', cls:'face-wobble'      }, // 8
+      { name:'HAMBRIENTO', eyes:'°  °', mouth:'ω',  accent:'#ffd574', cls:'face-droop'       }, // 9
+      { name:'TRISTE',     eyes:'T  T', mouth:'⌢', accent:'#9492ff', cls:'face-droop'       }, // 10
+      { name:'ENFERMO',    eyes:'~  ~', mouth:'≈',  accent:'#a3e635', cls:'face-sick'        }, // 11
+      { name:'R.I.P.',     eyes:'✕  ✕', mouth:'_',  accent:'#555555', cls:'face-dead'        }, // 12
     ];
 
-    let prevMood = -1;
-    let fbTimer  = null;
+    const PERSONALITIES = {
+      0: { name:'Feliz',    icon:'😊', color:'#6bff8f' },
+      1: { name:'Glotón',   icon:'🍔', color:'#ffd574' },
+      2: { name:'Dormilón', icon:'😴', color:'#9492ff' },
+      3: { name:'Activo',   icon:'⚡', color:'#ff7351' },
+    };
+
+    let prevMood    = -1;
+    let fbTimer     = null;
+    let lastNight   = false;
 
     function statColor(v) {
       if (v > 50) return '#6bff8f';
@@ -302,21 +417,37 @@
     }
 
     function applyState(s) {
-      const m   = MOODS[s.mood] ?? MOODS[0];
-      const a   = m.accent;
+      const m    = MOODS[s.mood] ?? MOODS[0];
+      const a    = m.accent;
       const dead = s.dead ?? false;
 
-      // Face
-      const eyes  = document.getElementById('eyes');
-      const mouth = document.getElementById('mouth');
+      // ── Cara animada ──────────────────────────────────────────────────────
+      const eyes     = document.getElementById('eyes');
+      const mouth    = document.getElementById('mouth');
+      const faceWrap = document.getElementById('faceWrap');
+
       eyes.textContent  = m.eyes;
       mouth.textContent = m.mouth;
-      eyes.style.color  = a;
-      mouth.style.color = a;
-      eyes.style.textShadow  = `0 0 12px ${a}88`;
-      mouth.style.textShadow = `0 0 8px ${a}66`;
+      eyes.style.color        = a;
+      mouth.style.color       = a;
+      eyes.style.textShadow   = `0 0 16px ${a}99`;
+      mouth.style.textShadow  = `0 0 10px ${a}77`;
 
-      // Badge
+      // Resetear animación al cambiar mood (forzar re-render)
+      if (s.mood !== prevMood) {
+        faceWrap.className = 'font-mono text-center select-none leading-none';
+        void faceWrap.offsetWidth; // reflow
+        faceWrap.className = `font-mono text-center select-none leading-none ${m.cls}`;
+
+        // Zzz
+        const zzz = document.getElementById('zzz');
+        if (s.mood === 1) { zzz.classList.remove('hidden'); zzz.style.color = a; }
+        else              { zzz.classList.add('hidden'); }
+
+        prevMood = s.mood;
+      }
+
+      // ── Badge ─────────────────────────────────────────────────────────────
       const badge    = document.getElementById('badge');
       const moodDot  = document.getElementById('moodDot');
       const badgeWrap = badge.parentElement;
@@ -326,29 +457,22 @@
       badgeWrap.style.borderColor = `${a}33`;
       badgeWrap.style.background  = `${a}0a`;
 
-      // Screen glow
-      document.getElementById('screen').style.boxShadow =
-        `inset 0 0 30px ${a}14, 0 0 0 1px ${a}22, 0 0 40px ${a}0a`;
+      // ── Screen glow + background tint ─────────────────────────────────────
+      const screen = document.getElementById('screen');
+      screen.style.background  = `radial-gradient(ellipse at 50% 40%, ${a}0e 0%, #000000 65%)`;
+      screen.style.boxShadow   = `inset 0 0 35px ${a}12, 0 0 0 1px ${a}22, 0 0 50px ${a}08`;
 
-      // Zzz
-      if (s.mood !== prevMood) {
-        const zzz = document.getElementById('zzz');
-        if (s.mood === 1) { zzz.classList.remove('hidden'); zzz.style.color = a; }
-        else              { zzz.classList.add('hidden'); }
-        prevMood = s.mood;
-      }
-
-      // Dead overlay
+      // ── Dead overlay ───────────────────────────────────────────────────────
       document.getElementById('deadOverlay').style.display = dead ? 'flex' : 'none';
 
-      // Disable care buttons when dead
-      ['btn-feed','btn-play','btn-pet','btn-sleep','btn-medicine','btn-clean',
-       'btn-shake','btn-startle'].forEach(id => {
+      const allBtns = ['btn-feed','btn-play','btn-pet','btn-sleep','btn-medicine',
+                       'btn-clean','btn-shake','btn-startle'];
+      allBtns.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.disabled = dead;
       });
 
-      // Stat bars
+      // ── Stat bars ─────────────────────────────────────────────────────────
       const hunger    = s.hunger    ?? 0;
       const happiness = s.happiness ?? 0;
       const energy    = s.energy    ?? 0;
@@ -369,11 +493,12 @@
       eBar.style.width      = energy + '%';
       eBar.style.background = energy > 50 ? '#9492ff' : energy > 25 ? '#ffd574' : '#ff7351';
 
-      // Status badges
-      document.getElementById('poopBadge').style.display = s.needsClean ? 'flex' : 'none';
-      document.getElementById('sickBadge').style.display = s.sick       ? 'flex' : 'none';
+      // ── Status badges ─────────────────────────────────────────────────────
+      document.getElementById('poopBadge').style.display  = s.needsClean ? 'flex' : 'none';
+      document.getElementById('sickBadge').style.display  = s.sick       ? 'flex' : 'none';
+      document.getElementById('nightBadge').style.display = s.sleeping && !dead ? 'flex' : 'none';
 
-      // Highlight medicine / clean buttons when needed
+      // Resaltar botones de medicina/limpiar
       const medBtn   = document.getElementById('btn-medicine');
       const cleanBtn = document.getElementById('btn-clean');
       medBtn.style.boxShadow   = s.sick       ? '0 0 0 1px #a3e63566' : '';
@@ -384,6 +509,19 @@
       document.getElementById('sleepLabel').textContent = s.sleeping ? 'Despertar' : 'Dormir';
 
       document.getElementById('ageDisplay').textContent = formatAge(s.ageHours ?? 0);
+
+      // ── Personalidad ──────────────────────────────────────────────────────
+      const p = PERSONALITIES[s.personality ?? 0];
+      if (p) {
+        document.getElementById('personalityName').textContent = `${p.icon} ${p.name}`;
+        document.getElementById('personalityName').style.color = p.color;
+        Object.keys(PERSONALITIES).forEach(i => {
+          const el = document.getElementById(`p-${i}`);
+          if (el) el.style.boxShadow = parseInt(i) === (s.personality ?? 0)
+            ? `0 0 0 1px ${PERSONALITIES[i].color}55, 0 0 8px ${PERSONALITIES[i].color}22`
+            : '';
+        });
+      }
     }
 
     function setOnline(online, updatedAt) {
@@ -452,13 +590,24 @@
           body: JSON.stringify({ command: cmd }),
         });
         feedback(res.ok ? `✓ ${LABELS[cmd] ?? cmd}` : '✗ error', res.ok);
-        if (res.ok) poll(); // refresh inmediato
+        if (res.ok) poll();
       } catch {
         feedback('✗ sin red', false);
       } finally {
-        // Re-enable non-dead buttons (poll() will re-apply dead state)
         btns.forEach(b => b.disabled = false);
       }
+    }
+
+    async function setPersonality(type) {
+      try {
+        const res = await fetch('/api/personality', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type }),
+        });
+        if (res.ok) { feedback('Personalidad actualizada ✓', true); poll(); }
+        else feedback('✗ error', false);
+      } catch { feedback('✗ sin red', false); }
     }
 
     poll();

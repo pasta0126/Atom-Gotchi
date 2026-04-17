@@ -11,6 +11,7 @@ GotchiDisplay::GotchiDisplay()
       _currentMood((uint8_t)Mood::HAPPY),
       _alertPending(false), _alertUntil(0),
       _warnHunger(false), _warnHappiness(false), _warnEnergy(false), _warnSick(false),
+      _needsClean(false), _isSick(false), _persistSpeechNext(0), _persistSpeechClearAt(0),
       _lifeState(LifeState::IDLE),
       _stateUntil(0), _nextGlanceMs(0), _soundReactUntil(0),
       _gazeH(0), _gazeV(0), _targetGazeH(0), _targetGazeV(0),
@@ -30,11 +31,11 @@ void GotchiDisplay::begin() {
     M5.Display.fillScreen(TFT_BLACK);
 
     auto* face128 = new Face(
-        new Mouth(20, 36, 2, 24),   new BoundingRect(68, 65),
-        new Eye(4, false),          new BoundingRect(50, 36),
-        new Eye(4, true),           new BoundingRect(51, 92),
-        new Eyeblow(13, 0, false),  new BoundingRect(36, 38),
-        new Eyeblow(13, 0, true),   new BoundingRect(38, 92),
+        new Mouth(24, 44, 3, 28),   new BoundingRect(72, 65),
+        new Eye(6, false),          new BoundingRect(50, 36),
+        new Eye(6, true),           new BoundingRect(51, 92),
+        new Eyeblow(15, 0, false),  new BoundingRect(34, 38),
+        new Eyeblow(15, 0, true),   new BoundingRect(36, 92),
         new BoundingRect(0, 0, 128, 128),
         new M5Canvas(&M5.Display),
         new M5Canvas(&M5.Display)
@@ -55,6 +56,8 @@ void GotchiDisplay::update(const GotchiStats& stats, float ax, float ay, float m
     _imuAy       = ay;
     _micRms      = micRms;
     _currentMood = (uint8_t)stats.mood;
+    _needsClean  = stats.needsClean;
+    _isSick      = stats.isSick;
 
     if (_lastMood != (uint8_t)stats.mood) {
         _lastMood = (uint8_t)stats.mood;
@@ -100,7 +103,7 @@ void GotchiDisplay::update(const GotchiStats& stats, float ax, float ay, float m
         }
     }
 
-    if (now >= _alertUntil && _alertUntil > 0) {
+    if (now >= _alertUntil && _alertUntil > 0 && (Mood)_currentMood != Mood::DEAD) {
         _avatar->setSpeechText("");
         _alertUntil = 0;
     }
@@ -226,6 +229,30 @@ void GotchiDisplay::_tick(Avatar* av) {
     // ── 7. Animación LED ──────────────────────────────────────────────────
     _animateLED(mood, now);
 
+    // ── 9. Indicadores persistentes de muerte / enfermedad / sucio ───────
+    if (mood == Mood::DEAD) {
+        if (now >= _persistSpeechNext) {
+            av->setSpeechText("** R.I.P. **");
+            _persistSpeechNext = now + 4000;
+        }
+    } else {
+        if (_persistSpeechClearAt > 0 && now >= _persistSpeechClearAt) {
+            av->setSpeechText("");
+            _persistSpeechClearAt = 0;
+        }
+        if (!_alertPending && _persistSpeechClearAt == 0 && now >= _persistSpeechNext) {
+            if (_isSick) {
+                av->setSpeechText("x.x  nausea...");
+                _persistSpeechClearAt = now + 3000;
+                _persistSpeechNext    = now + 10000;
+            } else if (_needsClean) {
+                av->setSpeechText("!SUCIO!  limpia");
+                _persistSpeechClearAt = now + 3000;
+                _persistSpeechNext    = now + 8000;
+            }
+        }
+    }
+
     // ── 8. Flash de pantalla para llamar la atención ──────────────────────
     // Activa cada 30 s cuando el gotchi necesita cuidado y no está durmiendo
     if (_needsAttention && !isSleeping && _flashCount == 0) {
@@ -265,7 +292,7 @@ Expression GotchiDisplay::_moodToExpression(Mood m) {
         case Mood::HUNGRY:   return Expression::Sad;
         case Mood::SAD:      return Expression::Sad;
         case Mood::SICK:     return Expression::Doubt;
-        case Mood::DEAD:     return Expression::Neutral;
+        case Mood::DEAD:     return Expression::Sad;
         case Mood::ANGRY:    return Expression::Angry;
         case Mood::ANNOYED:  return Expression::Angry;
         case Mood::STARTLED: return Expression::Doubt;
@@ -425,9 +452,9 @@ void GotchiDisplay::_animateLED(Mood m, unsigned long now) {
 
     switch (m) {
         case Mood::DEAD: {
-            // Parpadeo lento rojo apagado — peligro mínimo
-            bool on = (now / 800) % 2;
-            M5.Led.setColor(0, on ? 25 : 0, 0, 0);
+            // Parpadeo rojo sostenido — indica muerte claramente
+            bool on = (now / 400) % 2;
+            M5.Led.setColor(0, on ? 80 : 5, 0, 0);
             break;
         }
         case Mood::SICK: {

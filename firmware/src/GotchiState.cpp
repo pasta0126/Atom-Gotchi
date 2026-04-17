@@ -4,7 +4,7 @@
 GotchiState::GotchiState()
     : _mood(Mood::HAPPY), _moodChanged(true),
       _hunger(80), _happiness(80), _energy(80),
-      _isSick(false), _isDead(false), _serverSleeping(false), _needsAttentionFlag(false),
+      _isSick(false), _isDead(false), _serverSleeping(false), _needsAttentionFlag(false), _needsClean(false),
       _isDizzy(false), _isExcited(false), _isLaughing(false),
       _isAngry(false), _isStartled(false), _isAnnoyed(false),
       _inducedSleep(false), _noiseActive(false),
@@ -44,6 +44,7 @@ void GotchiState::setVitals(int hunger, int happiness, int energy,
     _isSick              = sick;
     _isDead              = dead;
     _serverSleeping      = sleeping;
+    _needsClean          = needsClean;
     _needsAttentionFlag  = (needsClean || sick || dead || hunger < 40);
     _recalcMood();
 }
@@ -227,5 +228,5 @@ void GotchiState::_recalcMood() {
 }
 
 GotchiStats GotchiState::getStats() const {
-    return { _mood, _hunger, _happiness, _energy, _needsAttentionFlag };
+    return { _mood, _hunger, _happiness, _energy, _needsAttentionFlag, _needsClean, _isSick };
 }

@@ -51,6 +51,12 @@ private:
     bool _warnEnergy;
     bool _warnSick;
 
+    // Indicadores de estado persistentes
+    volatile bool   _needsClean;
+    volatile bool   _isSick;
+    unsigned long   _persistSpeechNext;    // próxima emisión de speech
+    unsigned long   _persistSpeechClearAt; // cuándo borrar el speech persistente (0 = inactivo)
+
     // Flash de atención (pantalla + LED)
     volatile bool   _needsAttention;
     unsigned long   _lastAttentionFlash;  // última vez que se hizo flash

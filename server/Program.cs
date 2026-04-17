@@ -37,5 +37,12 @@ app.MapPost("/api/command", (CommandDto dto, GotchiStore store) =>
     return Results.Ok();
 });
 
+// Cambiar personalidad del Gotchi
+app.MapPost("/api/personality", (PersonalityDto dto, GotchiStore store) =>
+{
+    store.SetPersonality(dto.Type);
+    return Results.Ok();
+});
+
 app.MapFallbackToFile("index.html");
 app.Run();

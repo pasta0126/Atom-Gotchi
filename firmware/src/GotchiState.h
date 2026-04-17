@@ -22,7 +22,9 @@ struct GotchiStats {
     uint8_t  hunger;
     uint8_t  happiness;
     uint8_t  energy;
-    bool     needsAttention; // hambre baja, caca sin limpiar o enfermo
+    bool     needsAttention;
+    bool     needsClean;
+    bool     isSick;
 };
 
 class GotchiState {
@@ -68,6 +70,7 @@ private:
     bool         _isDead;
     bool         _serverSleeping;
     bool         _needsAttentionFlag;
+    bool         _needsClean;
 
     // ── Flags de sensores con timestamps ──────────────────────────────────
     bool          _isDizzy;
