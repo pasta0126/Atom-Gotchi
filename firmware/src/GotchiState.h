@@ -1,6 +1,14 @@
 #pragma once
 #include <Arduino.h>
 
+// Personality types — mirrors server GotchiPersonality enum (same int values)
+enum class GotchiType : uint8_t {
+    FELIZ    = 0,  // social, loves petting, forgiving
+    GLOTON   = 1,  // excited by sounds/food, impatient with petting
+    DORMILON = 2,  // easily disturbed from sleep, gets bored fast
+    ACTIVO   = 3,  // loves movement, hard to startle, gets bored quickly
+};
+
 enum class Mood : uint8_t {
     HAPPY     = 0,
     SLEEPING  = 1,
@@ -37,6 +45,10 @@ public:
     void setVitals(int hunger, int happiness, int energy,
                    bool sick, bool dead, bool sleeping, bool needsClean);
 
+    // ── Tipo de gotchi (refleja GotchiPersonality del servidor) ───────────
+    void      setType(GotchiType t) { _type = t; }
+    GotchiType getType() const      { return _type; }
+
     // ── Acciones desde app/web ─────────────────────────────────────────────
     void pet();
 
@@ -59,6 +71,16 @@ private:
     void _recalcMood();
     void _touchInteraction();
 
+    // Per-type affinity helpers
+    unsigned long _laughDur()          const;
+    unsigned long _angryDur()          const;
+    unsigned long _startledDur()       const;
+    float         _noiseThresh()       const;
+    unsigned long _excitedDur(float rms) const;
+    int           _petMaxCount()       const;
+    unsigned long _boredMs()           const;
+
+    GotchiType   _type;
     Mood         _mood;
     bool         _moodChanged;
 

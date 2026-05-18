@@ -312,7 +312,8 @@ public sealed class GotchiStore : IDisposable
 
     private VitalsDto _BuildVitals() => new(
         (int)_hunger, (int)_happiness, (int)_energy,
-        _sick, _dead, _needsClean, _sleeping);
+        _sick, _dead, _needsClean, _sleeping,
+        (int)_personality);
 
     private GotchiStateModel _BuildModel() => new(
         _mood,

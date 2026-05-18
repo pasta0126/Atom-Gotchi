@@ -87,7 +87,7 @@ void GotchiWiFi::_pushState() {
     if (code == HTTP_CODE_OK) {
         String resp = http.getString();
         // Parsear vitals del JSON de respuesta
-        // {"hunger":N,"happiness":N,"energy":N,"sick":bool,"dead":bool,"needsClean":bool,"sleeping":bool}
+        // {"hunger":N,"happiness":N,"energy":N,"sick":bool,"dead":bool,"needsClean":bool,"sleeping":bool,"personality":N}
         auto getInt = [&](const char* key) -> int {
             String search = String("\"") + key + "\":";
             int i = resp.indexOf(search);
@@ -101,16 +101,20 @@ void GotchiWiFi::_pushState() {
             return resp.substring(i + search.length()).startsWith("true");
         };
 
-        int hunger    = getInt("hunger");
-        int happiness = getInt("happiness");
-        int energy    = getInt("energy");
-        bool sick      = getBool("sick");
-        bool dead      = getBool("dead");
+        int hunger      = getInt("hunger");
+        int happiness   = getInt("happiness");
+        int energy      = getInt("energy");
+        bool sick       = getBool("sick");
+        bool dead       = getBool("dead");
         bool needsClean = getBool("needsClean");
-        bool sleeping  = getBool("sleeping");
+        bool sleeping   = getBool("sleeping");
+        int personality = getInt("personality");
 
         if (hunger >= 0) {
             _state.setVitals(hunger, happiness, energy, sick, dead, sleeping, needsClean);
+        }
+        if (personality >= 0) {
+            _state.setType(static_cast<GotchiType>(constrain(personality, 0, 3)));
         }
     } else if (code < 0) {
         Serial.printf("[WiFi] pushState error: %s\n", http.errorToString(code).c_str());

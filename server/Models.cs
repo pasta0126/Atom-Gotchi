@@ -14,7 +14,8 @@ public record DeviceStateDto(int Mood);
 // Respuesta del servidor al Atom tras POST /api/state
 public record VitalsDto(
     int Hunger, int Happiness, int Energy,
-    bool Sick, bool Dead, bool NeedsClean, bool Sleeping);
+    bool Sick, bool Dead, bool NeedsClean, bool Sleeping,
+    int Personality);
 
 // Estado completo para la web: GET /api/state/current
 public record GotchiStateModel(
