@@ -21,6 +21,9 @@
 #ifndef OTA_PASS
 #define OTA_PASS ""
 #endif
+#ifndef API_KEY
+#define API_KEY ""
+#endif
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Estados y poses
@@ -136,6 +139,7 @@ static void netTask(void*) {
         http.setTimeout(2500);
         const String url = String(API_URL) + "/api/claude";
         if (https) http.begin(secure, url); else http.begin(plain, url);
+        http.addHeader("X-Api-Key", API_KEY);
         int code = http.GET();
         if (code == 200) {
             Remote r;
@@ -153,6 +157,7 @@ static void netTask(void*) {
             const String aurl = String(API_URL) + "/api/ack";
             if (https) http.begin(secure, aurl); else http.begin(plain, aurl);
             http.addHeader("Content-Type", "application/json");
+            http.addHeader("X-Api-Key", API_KEY);
             int ac = http.POST("{}");
             Serial.printf("ack -> %d\n", ac);
             if (ac <= 0) http.end();

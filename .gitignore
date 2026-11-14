@@ -5,6 +5,7 @@ firmware/.pio/
 firmware/src/credentials.h
 
 # ── .NET / servidor ─────────────────────────────────────────
+server/.env
 server/bin/
 server/obj/
 

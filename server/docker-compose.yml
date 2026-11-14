@@ -8,6 +8,7 @@ services:
     restart: unless-stopped
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
+      - API_KEY=${API_KEY:-}   # se lee de .env (no versionado); vacío = sin autenticación
     networks:
       - proxy
     labels:

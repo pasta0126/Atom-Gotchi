@@ -5,9 +5,10 @@
 #   gotchi-session.sh auto       sigue todas (automático)
 # URL configurable con GOTCHI_URL (por defecto producción).
 URL="${GOTCHI_URL:-https://atom-api.northernarchive.com}"
+KEY=$(cat "${GOTCHI_KEY_FILE:-$HOME/.config/atom-gotchi/key}" 2>/dev/null)
 
 list() {
-  curl -s -m 5 "$URL/api/sessions" | python3 -c "$(cat <<'PY'
+  curl -s -m 5 -H "X-Api-Key: $KEY" "$URL/api/sessions" | python3 -c "$(cat <<'PY'
 import json, sys
 d = json.load(sys.stdin)
 print("seguida: " + (d["active"] or "auto (todas)"))
@@ -21,14 +22,14 @@ PY
 
 case "$1" in
   ""|list) list ;;
-  auto) curl -s -m 5 -X POST -H 'Content-Type: application/json' -d '{"id":"auto"}' "$URL/api/active"; echo ;;
+  auto) curl -s -m 5 -H "X-Api-Key: $KEY" -X POST -H 'Content-Type: application/json' -d '{"id":"auto"}' "$URL/api/active"; echo ;;
   use)
     target="$2"
     case "$target" in
       ''|*[!0-9]*) ;;   # no es un número: se envía tal cual (id, prefijo o nombre)
-      *) target=$(curl -s -m 5 "$URL/api/sessions" | python3 -c 'import json,sys; d=json.load(sys.stdin)["sessions"]; n=int(sys.argv[1]); print(d[n-1]["id"] if 0<n<=len(d) else "")' "$target") ;;
+      *) target=$(curl -s -m 5 -H "X-Api-Key: $KEY" "$URL/api/sessions" | python3 -c 'import json,sys; d=json.load(sys.stdin)["sessions"]; n=int(sys.argv[1]); print(d[n-1]["id"] if 0<n<=len(d) else "")' "$target") ;;
     esac
     [ -z "$target" ] && { echo "sesión no encontrada" >&2; exit 1; }
-    curl -s -m 5 -X POST -H 'Content-Type: application/json' -d "{\"id\":\"$target\"}" "$URL/api/active"; echo ;;
+    curl -s -m 5 -H "X-Api-Key: $KEY" -X POST -H 'Content-Type: application/json' -d "{\"id\":\"$target\"}" "$URL/api/active"; echo ;;
   *) echo "uso: $0 [list | use <n|id|nombre> | auto]" >&2; exit 1 ;;
 esac
