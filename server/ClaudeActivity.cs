@@ -1,6 +1,8 @@
 namespace AtomGotchi.Api;
 
 // Datos que el servidor envía al Atom en cada consulta.
+public record SessionInfo(string Id, string Name, string State, long DoneSeq, string Tool);
+
 public record ClaudeSnapshot(
     string State,       // idle|alert|work|wait|done|error|bored|sleep
     string Tool,        // read|search|edit|bash|web|agent|other|"" (solo en work)
@@ -9,7 +11,9 @@ public record ClaudeSnapshot(
     long DoneSeq,       // contador de tareas terminadas (sube con cada Stop)
     string DoneProject, // proyecto de la última tarea terminada
     int TasksToday,
-    int Sessions);
+    int Sessions,
+    string WaitMsg,                       // mensaje de la notificación de la sesión dominante en wait
+    IReadOnlyList<SessionInfo> List);     // sesiones, la más reciente primero
 
 // Agrega la actividad de todas las sesiones de Claude Code (vía hooks) en un único
 // estado que el Atom puede pintar, más "memoria" (rachas, errores) para el humor.
@@ -30,7 +34,7 @@ public sealed class ClaudeActivity
     // Memoria del humor
     static readonly TimeSpan ErrorMemory = TimeSpan.FromMinutes(10);
 
-    record Session(string State, DateTime Since, string Project, string Tool);
+    record Session(string State, DateTime Since, string Project, string Tool, long Done = 0, string Msg = "", DateTime Born = default);
 
     readonly object _lock = new();
     readonly Dictionary<string, Session> _sessions = new();
@@ -67,7 +71,7 @@ public sealed class ClaudeActivity
         _ => "other",
     };
 
-    public void Apply(string eventName, string? sessionId, string? cwd = null, string? toolName = null)
+    public void Apply(string eventName, string? sessionId, string? cwd = null, string? toolName = null, string? message = null)
     {
         var id = string.IsNullOrEmpty(sessionId) ? "default" : sessionId;
         var now = _now();
@@ -83,23 +87,25 @@ public sealed class ClaudeActivity
 
             switch (eventName)
             {
-                case "SessionStart": _sessions[id] = new("alert", now, project, ""); break;
+                case "SessionStart": _sessions[id] = new("alert", now, project, "", prev?.Done ?? 0); break;
                 case "UserPromptSubmit":
                 case "SubagentStop":
-                case "PreCompact":   _sessions[id] = new("work", now, project, prev?.Tool ?? "other"); break;
+                case "PreCompact":   _sessions[id] = new("work", now, project, prev?.Tool ?? "other", prev?.Done ?? 0); break;
                 case "PreToolUse":
-                case "PostToolUse":  _sessions[id] = new("work", now, project, tool); break;
-                case "Notification": _sessions[id] = new("wait", now, project, ""); break;
+                case "PostToolUse":  _sessions[id] = new("work", now, project, tool, prev?.Done ?? 0); break;
+                case "Notification": _sessions[id] = new("wait", now, project, "", prev?.Done ?? 0, message ?? ""); break;
                 case "Stop":
-                    _sessions[id] = new("done", now, project, "");
+                    _sessions[id] = new("done", now, project, "", (prev?.Done ?? 0) + 1);
                     _doneSeq++; _doneProject = project; _tasksToday++; _errorStreak = 0;
                     break;
                 case "PostToolUseFailure":
-                    _sessions[id] = new("error", now, project, "");
+                    _sessions[id] = new("error", now, project, "", prev?.Done ?? 0);
                     _errorStreak++; _lastError = now;
                     break;
                 case "SessionEnd": _sessions.Remove(id); break;
             }
+            // El orden de la lista debe ser estable: por momento de aparición de la sesión
+            if (_sessions.TryGetValue(id, out var cur)) _sessions[id] = cur with { Born = prev?.Born ?? now };
         }
     }
 
@@ -132,6 +138,28 @@ public sealed class ClaudeActivity
         return 0;
     }
 
+    // Lista para el selector del Atom: orden estable (por aparición); nombres duplicados con sufijo " #n".
+    List<SessionInfo> BuildList(DateTime now)
+    {
+        var ordered = _sessions.OrderBy(kv => kv.Value.Born).ThenBy(kv => kv.Key).ToList();
+        var seen = new Dictionary<string, int>();
+        var total = ordered.GroupBy(kv => kv.Value.Project).ToDictionary(g => g.Key, g => g.Count());
+        var res = new List<SessionInfo>();
+        foreach (var kv in ordered)
+        {
+            var name = kv.Value.Project == "" ? "sesion" : kv.Value.Project;
+            if (total[kv.Value.Project] > 1)
+            {
+                seen[kv.Value.Project] = seen.GetValueOrDefault(kv.Value.Project) + 1;
+                name += " #" + seen[kv.Value.Project];
+            }
+            var id = kv.Key.Length > 4 ? kv.Key[..4] : kv.Key;
+            var eff = Effective(kv.Value, now);
+            res.Add(new SessionInfo(id, name, eff, kv.Value.Done, eff == "work" ? kv.Value.Tool : ""));
+        }
+        return res;
+    }
+
     public ClaudeSnapshot Snapshot()
     {
         var now = _now();
@@ -139,22 +167,23 @@ public sealed class ClaudeActivity
         {
             foreach (var k in _sessions.Where(kv => now - kv.Value.Since > ForgetAfter).Select(kv => kv.Key).ToList())
                 _sessions.Remove(k);
-            var best = "idle"; var project = ""; var tool = "";
+            var best = "idle"; var project = ""; var tool = ""; var waitMsg = "";
             foreach (var s in _sessions.Values)
             {
                 var e = Effective(s, now);
                 if (Priority(e) > Priority(best) || (Priority(e) == Priority(best) && project == ""))
                 {
-                    best = e; project = s.Project; tool = e == "work" ? s.Tool : "";
+                    best = e; project = s.Project; tool = e == "work" ? s.Tool : ""; waitMsg = e == "wait" ? s.Msg : "";
                 }
             }
+            var list = BuildList(now);
             if (best == "idle")
             {
                 var quiet = now - _lastActivity;
                 best = quiet > SleepAfter ? "sleep" : quiet > BoredAfter ? "bored" : "idle";
             }
             if (now.Date != _day) { _day = now.Date; _tasksToday = 0; }
-            return new ClaudeSnapshot(best, tool, project, ComputeMood(now), _doneSeq, _doneProject, _tasksToday, _sessions.Count);
+            return new ClaudeSnapshot(best, tool, project, ComputeMood(now), _doneSeq, _doneProject, _tasksToday, _sessions.Count, waitMsg, list);
         }
     }
 }

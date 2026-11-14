@@ -14,8 +14,13 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <ArduinoOTA.h>
 #include <math.h>
 #include "credentials.h"
+
+#ifndef OTA_PASS
+#define OTA_PASS ""
+#endif
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Estados y poses
@@ -52,16 +57,21 @@ static const Pose POSES[S_COUNT] = {
 // ─────────────────────────────────────────────────────────────────────────────
 // Datos remotos (los escribe la tarea WiFi en core 0, los lee el loop en core 1)
 // ─────────────────────────────────────────────────────────────────────────────
+#define MAX_SESS 6
+struct Sess { char id[8]; char name[24]; uint8_t state; uint8_t tool; long done; };
 struct Remote {
     int8_t  state = -1;       // -1 = sin datos todavía
     uint8_t tool = T_NONE;
     int8_t  mood = 0;         // -2..2
-    long    done = -1;        // contador de tareas terminadas del servidor
-    char    doneProject[32] = "";
+    char    waitMsg[84] = "";
+    uint8_t nList = 0;
+    Sess    list[MAX_SESS];
 };
-static Remote remote;
+static Remote remote;   // escrito por netTask
+static Remote R;        // copia del frame actual (loop)
 static portMUX_TYPE remoteMux = portMUX_INITIALIZER_UNLOCKED;
 static volatile bool wifiUp = false;
+static volatile int otaPct = -1;
 
 static int indexOf(const char* const* names, int n, const String& v) {
     for (int i = 0; i < n; i++) if (v == names[i]) return i;
@@ -74,6 +84,7 @@ static void parseBody(const String& body, Remote& r) {
         if (s >= 0) r.state = s;
         return;
     }
+    r.nList = 0; r.waitMsg[0] = 0;
     int pos = 0;
     while (pos < (int)body.length()) {
         int nl = body.indexOf('\n', pos);
@@ -87,8 +98,18 @@ static void parseBody(const String& body, Remote& r) {
         if (k == "state") { int s = indexOf(STATE_NAME, S_COUNT, v); if (s >= 0) r.state = s; }
         else if (k == "tool") { int t = indexOf(TOOL_NAME, T_COUNT, v); r.tool = t >= 0 ? t : T_NONE; }
         else if (k == "mood") r.mood = constrain(v.toInt(), -2, 2);
-        else if (k == "done") r.done = v.toInt();
-        else if (k == "doneproject") strlcpy(r.doneProject, v.c_str(), sizeof(r.doneProject));
+        else if (k == "waitmsg") strlcpy(r.waitMsg, v.c_str(), sizeof(r.waitMsg));
+        else if (k == "s" && r.nList < MAX_SESS) {   // id|nombre|estado|tareas|herramienta
+            Sess& x = r.list[r.nList];
+            int a = v.indexOf('|'), b = v.indexOf('|', a + 1), c = v.indexOf('|', b + 1), d = v.indexOf('|', c + 1);
+            if (a < 0 || b < 0 || c < 0) continue;
+            strlcpy(x.id, v.substring(0, a).c_str(), sizeof(x.id));
+            strlcpy(x.name, v.substring(a + 1, b).c_str(), sizeof(x.name));
+            int st = indexOf(STATE_NAME, S_COUNT, v.substring(b + 1, c)); x.state = st >= 0 ? st : S_IDLE;
+            x.done = v.substring(c + 1, d < 0 ? v.length() : d).toInt();
+            int tl = d < 0 ? -1 : indexOf(TOOL_NAME, T_COUNT, v.substring(d + 1)); x.tool = tl >= 0 ? tl : T_NONE;
+            r.nList++;
+        }
     }
 }
 
@@ -106,11 +127,22 @@ static void netTask(void*) {
     WiFiClient plain;
     HTTPClient http;
     http.setReuse(true);
+    bool otaStarted = false;
     for (;;) {
         wifiUp = WiFi.status() == WL_CONNECTED;
         if (!wifiUp) {
             if (++waited % 3 == 0) Serial.printf("wifi status=%d\n", (int)WiFi.status());
             vTaskDelay(pdMS_TO_TICKS(1000)); continue;
+        }
+        if (!otaStarted) {   // OTA: flashear por WiFi sin cable (protegido con OTA_PASS)
+            ArduinoOTA.setHostname("atom-gotchi");
+            if (OTA_PASS[0]) ArduinoOTA.setPassword(OTA_PASS);
+            ArduinoOTA.onStart([]() { otaPct = 0; });
+            ArduinoOTA.onProgress([](unsigned int p, unsigned int t) { otaPct = (int)(p * 100 / t); });
+            ArduinoOTA.onEnd([]() { otaPct = 100; });
+            ArduinoOTA.onError([](ota_error_t) { otaPct = -1; });
+            ArduinoOTA.begin();
+            otaStarted = true;
         }
         http.setConnectTimeout(3000);
         http.setTimeout(2500);
@@ -128,7 +160,7 @@ static void netTask(void*) {
             portENTER_CRITICAL(&remoteMux); remote.state = S_BORED; remote.tool = T_NONE; portEXIT_CRITICAL(&remoteMux);
         }
         if (code <= 0) http.end();   // conexión rota: forzar reconexión; si no, se reutiliza
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        for (int i = 0; i < 10; i++) { ArduinoOTA.handle(); vTaskDelay(pdMS_TO_TICKS(100)); }
     }
 }
 
@@ -138,6 +170,8 @@ static void netTask(void*) {
 static M5Canvas canvas(&M5.Display);
 static Pose cur = POSES[S_IDLE];
 static State state = S_IDLE;
+enum UI : uint8_t { UI_FACE, UI_LIST };
+static UI ui = UI_FACE;
 static Tool curTool = T_NONE;
 static int mood = 0;
 static uint32_t stateSince = 0;
@@ -594,10 +628,7 @@ static void drawOverlays(float t, uint32_t now) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Aviso de tarea terminada (pendiente hasta pulsar el botón) y flashes
 // ─────────────────────────────────────────────────────────────────────────────
-static long lastDoneSeen = -1;
-static long ackedDone = -1;      // última tarea confirmada con el botón
-static bool pending = false;
-static char pendingProject[32] = "";
+static bool pending = false;     // hay tareas terminadas sin confirmar
 static uint32_t pendingSince = 0;
 static int curBrightness = -1;
 
@@ -605,10 +636,44 @@ static void setBrightnessIfChanged(int v) {
     if (v != curBrightness) { curBrightness = v; M5.Display.setBrightness(v); }
 }
 
-static void startDoneAlert(const char* project, uint32_t now) {
-    pending = true; pendingSince = now;
-    strlcpy(pendingProject, project, sizeof(pendingProject));
-    Serial.printf("done alert: %s\n", project[0] ? project : "(sin proyecto)");
+// Seguimiento por sesión de las tareas terminadas: "seen" = última vista, "acked" = última confirmada.
+struct Track { char id[8]; long seen; long acked; bool used; };
+static Track tracks[8];
+static int pend[MAX_SESS];       // índices de R.list con tareas sin confirmar
+static int nPend = 0;
+static int pendIdx = 0;
+
+static int findSess(const char* id) {
+    for (int i = 0; i < R.nList; i++) if (!strcmp(R.list[i].id, id)) return i;
+    return -1;
+}
+
+static Track* trackFor(const char* id, long doneNow) {
+    for (auto& t : tracks) if (t.used && !strcmp(t.id, id)) return &t;
+    for (auto& t : tracks) if (!t.used || findSess(t.id) < 0) {    // hueco libre o de una sesión que ya no existe
+        strlcpy(t.id, id, sizeof(t.id)); t.seen = t.acked = doneNow; t.used = true;   // línea base: sin aviso retroactivo
+        return &t;
+    }
+    return nullptr;
+}
+
+static void computePending(uint32_t now) {
+    nPend = 0;
+    for (int i = 0; i < R.nList; i++) {
+        Track* t = trackFor(R.list[i].id, R.list[i].done);
+        if (!t) continue;
+        long d = R.list[i].done;
+        if (d < t->seen) { t->seen = t->acked = d; }                   // el servidor se reinició
+        if (d > t->seen) { t->seen = d; pendingSince = now; Serial.printf("done alert: %s\n", R.list[i].name); }
+        if (d > t->acked && nPend < MAX_SESS) pend[nPend++] = i;
+    }
+    if (pendIdx >= nPend) pendIdx = 0;
+    pending = nPend > 0;
+}
+
+static void ackSession(int listIdx) {
+    Track* t = trackFor(R.list[listIdx].id, R.list[listIdx].done);
+    if (t) t->acked = R.list[listIdx].done;
 }
 
 // Borde que "respira": más vivo los primeros 12 s tras terminar, luego más lento y tenue.
@@ -629,19 +694,149 @@ static void drawBorder(uint32_t now) {
     for (int i = 0; i < 2; i++) canvas.drawRoundRect(i, i, 128 - 2 * i, 128 - 2 * i, 10, c);
 }
 
+// Texto abreviado con ".." para que quepa en maxW píxeles (usa la fuente activa del canvas)
+static void fitText(char* buf, int maxW) {
+    while (canvas.textWidth(buf) > maxW && strlen(buf) > 3) { buf[strlen(buf) - 1] = 0; buf[strlen(buf) - 1] = '.'; }
+}
+
 static void drawBanner(float t) {
-    if (!pending) return;
+    if (!pending || ui == UI_LIST) return;
     char buf[40];
-    strlcpy(buf, pendingProject[0] ? pendingProject : "listo", sizeof(buf));
+    const char* nm = R.list[pend[pendIdx]].name;
+    strlcpy(buf, nm[0] ? nm : "listo", sizeof(buf));
     canvas.setFont(&fonts::Font2); canvas.setTextSize(1);
-    while (canvas.textWidth(buf) > 100 && strlen(buf) > 3) buf[strlen(buf) - 1] = 0, buf[strlen(buf) - 1] = '.' ;
-    int tw = canvas.textWidth(buf) + 16;
+    fitText(buf, nPend > 1 ? 72 : 96);
+    char badge[8] = ""; if (nPend > 1) snprintf(badge, sizeof(badge), "%d/%d", pendIdx + 1, nPend);
+    int bw = badge[0] ? canvas.textWidth(badge) + 6 : 0;
+    int tw = canvas.textWidth(buf) + 16 + bw;
     int x = 64 - tw / 2;
     canvas.fillRoundRect(x - 3, 104, tw + 6, 19, 5, rgb(10, 50, 30));
-    // check ✓
     canvas.drawLine(x + 2, 114, x + 5, 118, rgb(120, 255, 170)); canvas.drawLine(x + 5, 118, x + 11, 108, rgb(120, 255, 170));
     canvas.setTextColor(rgb(220, 255, 235));
     canvas.drawString(buf, x + 15, 105);
+    if (badge[0]) { canvas.setTextColor(rgb(120, 200, 160)); canvas.drawString(badge, x + 15 + canvas.textWidth(buf) + 6, 105); }
+}
+
+// Mensaje de la notificación (qué pide permiso Claude), en marquesina
+static void drawWaitMsg(float t) {
+    if (state != S_WAIT || !R.waitMsg[0] || pending || ui == UI_LIST) return;
+    canvas.setClipRect(4, 102, 120, 20);
+    canvas.setFont(&fonts::Font2); canvas.setTextSize(1); canvas.setTextColor(rgb(255, 225, 150));
+    int tw = canvas.textWidth(R.waitMsg);
+    if (tw <= 118) canvas.drawCenterString(R.waitMsg, 64, 105);
+    else canvas.drawString(R.waitMsg, 124 - (int)fmodf(t * 32, (float)(tw + 124)), 105);
+    canvas.clearClipRect();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Selector de sesiones (lista) y seguimiento de una sesión concreta
+// ─────────────────────────────────────────────────────────────────────────────
+static char pinnedId[8] = "";           // "" = automático (agregado de todas)
+static int listCursor = 0;
+static uint32_t listLastInput = 0;
+static uint32_t toastUntil = 0;
+static char toastText[32] = "";
+
+static void showToast(const char* txt, uint32_t now) { strlcpy(toastText, txt, sizeof(toastText)); toastUntil = now + 2000; }
+
+static uint16_t stateDot(int st) {
+    switch (st) {
+        case S_WORK: return rgb(255, 150, 105);  case S_WAIT: return rgb(255, 200, 80);
+        case S_DONE: return rgb(120, 255, 170);  case S_ERROR: return rgb(165, 150, 255);
+        case S_BORED: return rgb(150, 170, 195); case S_SLEEP: return rgb(100, 110, 175);
+        default: return rgb(130, 220, 255);
+    }
+}
+
+static void drawList(uint32_t now) {
+    int n = R.nList + 1;                            // fila 0 = automático
+    int vis = n < 7 ? n : 7;
+    int start = listCursor - 3; if (start > n - vis) start = n - vis; if (start < 0) start = 0;
+    canvas.setFont(&fonts::Font2); canvas.setTextSize(1);
+    for (int k = 0; k < vis; k++) {
+        int idx = start + k, y = 5 + k * 17;
+        bool sel = idx == listCursor;
+        if (sel) { canvas.fillRoundRect(4, y - 1, 120, 17, 6, rgb(28, 42, 68)); canvas.drawRoundRect(4, y - 1, 120, 17, 6, rgb(110, 160, 230)); }
+        char buf[28];
+        bool pinned = idx == 0 ? pinnedId[0] == 0 : !strcmp(R.list[idx - 1].id, pinnedId);
+        if (idx == 0) { strlcpy(buf, "auto", sizeof(buf)); canvas.drawCircle(13, y + 8, 4, TFT_WHITE); }
+        else { strlcpy(buf, R.list[idx - 1].name, sizeof(buf)); canvas.fillCircle(13, y + 8, 4, stateDot(R.list[idx - 1].state)); }
+        fitText(buf, 78);
+        canvas.setTextColor(sel ? TFT_WHITE : rgb(170, 185, 210));
+        canvas.drawString(buf, 24, y);
+        if (pinned) canvas.fillTriangle(110, y + 4, 110, y + 12, 117, y + 8, rgb(255, 220, 120));   // ▶ seguida
+        if (idx > 0) {                                                                                     // ✓ sin ver
+            for (int q = 0; q < nPend; q++) if (pend[q] == idx - 1) { canvas.drawLine(98, y + 9, 100, y + 12, rgb(120, 255, 170)); canvas.drawLine(100, y + 12, 104, y + 5, rgb(120, 255, 170)); }
+        }
+    }
+}
+
+// Anillo de progreso por el perímetro de la pantalla (pulsación larga)
+static void drawRing(float p, uint16_t c) {
+    if (p <= 0.001f) return;
+    struct Seg { int x0, y0, dx, dy, len; };
+    static const Seg segs[5] = {{64, 2, 1, 0, 61}, {125, 2, 0, 1, 123}, {125, 125, -1, 0, 123}, {2, 125, 0, -1, 123}, {2, 2, 1, 0, 62}};
+    float left = p * 492;
+    for (const Seg& sg : segs) {
+        if (left <= 0) break;
+        int l = (int)fminf((float)sg.len, left); left -= sg.len;
+        int x1 = sg.x0 + sg.dx * l, y1 = sg.y0 + sg.dy * l;
+        canvas.fillRect(min(sg.x0, x1) - (sg.dy ? 1 : 0), min(sg.y0, y1) - (sg.dx ? 1 : 0),
+                        abs(x1 - sg.x0) + (sg.dy ? 3 : 1), abs(y1 - sg.y0) + (sg.dx ? 3 : 1), c);
+    }
+}
+
+static void drawToast(uint32_t now) {
+    if (now >= toastUntil) return;
+    char buf[32]; strlcpy(buf, toastText, sizeof(buf));
+    canvas.setFont(&fonts::Font2); canvas.setTextSize(1);
+    fitText(buf, 100);
+    int tw = canvas.textWidth(buf) + 14;
+    canvas.fillRoundRect(64 - tw / 2, 4, tw, 19, 6, rgb(20, 30, 50));
+    canvas.drawRoundRect(64 - tw / 2, 4, tw, 19, 6, rgb(110, 160, 230));
+    canvas.setTextColor(TFT_WHITE); canvas.drawCenterString(buf, 64, 6);
+}
+
+// Botón: click corto y pulsación larga (con anillo). Sin triple click para no añadir latencia.
+static uint32_t pressAt = 0, lastBtnAt = 0;
+static bool btnDown = false, longFired = false;
+static float ring = 0;
+static const uint32_t RING_DELAY = 350, RING_MS = 900;
+
+static bool longAvailable() { return ui == UI_LIST || nPend >= 2 || (nPend == 0 && R.nList >= 2); }
+
+static void doClick(uint32_t now) {
+    if (ui == UI_LIST) { listCursor = (listCursor + 1) % (R.nList + 1); listLastInput = now; return; }
+    if (nPend == 1) { ackSession(pend[0]); startReaction(R_PET); return; }
+    if (nPend >= 2) { pendIdx = (pendIdx + 1) % nPend; return; }
+    startReaction(R_PET);   // boop
+}
+
+static void doLong(uint32_t now) {
+    if (ui == UI_LIST) {
+        if (listCursor == 0) { pinnedId[0] = 0; showToast("auto", now); }
+        else { strlcpy(pinnedId, R.list[listCursor - 1].id, sizeof(pinnedId)); showToast(R.list[listCursor - 1].name, now); }
+        Serial.printf("follow: %s\n", pinnedId[0] ? pinnedId : "auto");
+        ui = UI_FACE; startReaction(R_PET); return;
+    }
+    if (nPend >= 2) { ackSession(pend[pendIdx]); pendIdx = 0; startReaction(R_PET); return; }
+    if (R.nList >= 2) {
+        ui = UI_LIST; listLastInput = now;
+        int pi = pinnedId[0] ? findSess(pinnedId) : -1; listCursor = pi >= 0 ? pi + 1 : 0;
+    }
+}
+
+static void handleButton(uint32_t now) {
+    if (M5.BtnA.wasPressed()) { pressAt = now; btnDown = true; longFired = false; lastBtnAt = now; Serial.printf("button: pressed (nPend=%d list=%d)\n", nPend, (int)R.nList); }
+    ring = 0;
+    if (btnDown && M5.BtnA.isPressed() && !longFired && longAvailable() && now - pressAt >= RING_DELAY) {
+        ring = clamp01((now - pressAt - RING_DELAY) / (float)RING_MS);
+        if (ring >= 1) { longFired = true; ring = 0; doLong(now); }
+    }
+    if (btnDown && M5.BtnA.wasReleased()) {
+        btnDown = false;
+        if (!longFired && (now - pressAt < RING_DELAY || !longAvailable())) doClick(now);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -649,7 +844,7 @@ static void drawBanner(float t) {
 // ─────────────────────────────────────────────────────────────────────────────
 static uint32_t spikeTimes[6] = {0};
 static int spikeCount = 0;
-static uint32_t lastSpike = 0, firstSpikeAt = 0, lastBtnAt = 0;
+static uint32_t lastSpike = 0, firstSpikeAt = 0;
 static int freefallFrames = 0;
 static float lastMag = 1;
 
@@ -703,12 +898,8 @@ void loop() {
     float t = now / 1000.0f;
 
     // ── entrada: botón ──
-    if (M5.BtnA.wasPressed()) {   // cualquier pulsación (corta o larga) responde al instante
-        lastBtnAt = now;
-        Serial.printf("button: pressed (pending=%d)\n", (int)pending);
-        if (pending) { pending = false; ackedDone = lastDoneSeen; startReaction(R_PET); }
-        else startReaction(R_PET);   // boop
-    }
+    handleButton(now);
+    if (ui == UI_LIST && (now - listLastInput > 7000 || R.nList < 2)) ui = UI_FACE;
 
     // ── entrada: serie (debug) ──
     while (Serial.available()) {
@@ -716,7 +907,6 @@ void loop() {
         if (c >= '0' && c < '0' + S_COUNT) { overrideUntil = now + 10000; setState((State)(c - '0')); }
         else if (c == 'a') { overrideUntil = 0; toolOverride = -1; }
         else if (c == 'T') { toolOverride = (toolOverride + 1) % T_COUNT; overrideUntil = now + 10000; setState(S_WORK); Serial.printf("tool=%s\n", TOOL_NAME[toolOverride]); }
-        else if (c == 'd') startDoneAlert("demo-project", now);
         else if (c == 'k') startReaction(R_DIZZY);
         else if (c == 'h') startReaction(R_PET);
         else if (c == 's') startReaction(R_STARTLE);
@@ -724,20 +914,25 @@ void loop() {
     }
 
     // ── datos remotos ──
-    Remote r;
-    portENTER_CRITICAL(&remoteMux); r = remote; portEXIT_CRITICAL(&remoteMux);
+    portENTER_CRITICAL(&remoteMux); R = remote; portEXIT_CRITICAL(&remoteMux);
+    const Remote& r = R;
     mood = r.mood;
-    if (r.done >= 0) {
-        if (lastDoneSeen < 0) lastDoneSeen = r.done;                    // primera sincronización: sin aviso
-        else if (r.done > lastDoneSeen) { lastDoneSeen = r.done; startDoneAlert(r.doneProject, now); }
-        else lastDoneSeen = r.done;                                     // el servidor se reinició
-    }
+    computePending(now);
     if (now >= overrideUntil) {
         toolOverride = -1;
-        int rs = r.state;
-        if (rs == S_DONE && r.done == ackedDone) rs = S_IDLE;   // ya confirmada: no repetir la cara de "terminado"
+        int rs = r.state; Tool rt = (Tool)r.tool;
+        if (pinnedId[0]) {   // seguir una sesión concreta (salvo que otra te necesite)
+            int pi = findSess(pinnedId);
+            if (pi < 0) { pinnedId[0] = 0; showToast("auto", now); }
+            else {
+                rs = r.list[pi].state; rt = (Tool)r.list[pi].tool;
+                for (int j = 0; j < r.nList; j++) if (j != pi && r.list[j].state == S_WAIT) { rs = S_WAIT; rt = T_NONE; }
+                if (rs == S_IDLE && (r.state == S_BORED || r.state == S_SLEEP)) rs = r.state;
+            }
+        }
+        if (rs == S_DONE && !pending) rs = S_IDLE;   // ya confirmada: no repetir la cara de "terminado"
         if (rs >= 0 && rs != state) setState((State)rs);
-        curTool = (Tool)r.tool;
+        curTool = rt;
     } else if (toolOverride >= 0) curTool = (Tool)toolOverride;
 
     // ── IMU y animaciones ──
@@ -774,6 +969,8 @@ void loop() {
     uint16_t bg = rgb(bgCur[0], bgCur[1], bgCur[2]);
     canvas.fillScreen(bg);
 
+    if (ui == UI_LIST) drawList(now);
+    else {
     float breathe = 1.0f + 0.025f * sinf(t * 2.0f);
     float b = blinkFactor(now);
     float cy = 62 + cur.yoff + fxSm[7];
@@ -785,10 +982,18 @@ void loop() {
         float cx = 64 + (i ? dx : -dx) + fxSm[6];
         drawEye(i, cx, cy + fxSm[4 + i], w, h, cur, fxSm[2 + i], fxSm[9], fxSm[8], fxRaw.dizzy, fxRaw.sparkle, t, bg);
     }
-    drawEffects(t, !pending);
+    drawEffects(t, !pending && !(state == S_WAIT && R.waitMsg[0]));
     drawOverlays(t, now);
     drawBanner(t);
+    drawWaitMsg(t);
+    }
     drawBorder(now);
+    drawToast(now);
+    drawRing(ring, rgb(255, 235, 150));
+    if (otaPct >= 0) {   // progreso de actualización por WiFi
+        canvas.fillRect(14, 58, 100, 12, rgb(20, 20, 30)); canvas.fillRect(16, 60, otaPct, 8, rgb(120, 220, 255));
+        canvas.setFont(&fonts::Font2); canvas.setTextColor(TFT_WHITE); canvas.drawCenterString("OTA", 64, 40);
+    }
     uint32_t r1 = micros();
     canvas.pushSprite(0, 0);
     M5.Display.waitDisplay();

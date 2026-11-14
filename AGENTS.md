@@ -26,6 +26,7 @@ pio run -e atom-gotchi                                   # build
 pio run -e atom-gotchi -t upload --upload-port /dev/cu.usbmodemXXXX   # flash
 ```
 
+- **OTA (no cable):** `cd firmware && OTA_PASS=$(grep OTA_PASS src/credentials.h | sed 's/.*"\(.*\)".*/\1/') pio run -e atom-gotchi-ota -t upload` (the Atom is `atom-gotchi.local`, same LAN as the dev Mac). The first flash after changing `board_build.partitions` must be by USB. `OTA_PASS` lives in the gitignored `credentials.h`.
 - If no `/dev/cu.usbmodem*` appears, hold the side button while plugging in USB (download mode).
 - `pio device monitor` needs an interactive TTY. To read serial from a script use pyserial (the PlatformIO venv has it).
 - The firmware prints `fps / render / push / heap / wifi / state` every 2 s on serial.
@@ -69,7 +70,7 @@ AtomS3R has **no speaker, buzzer, microphone or RGB LED** (`M5.Speaker/Mic/Led` 
 
 It also keeps "memory" for the personality: tasks finished today, consecutive-error streak and a `mood` in −2..2, plus a `done` counter that increments on every `Stop` together with the project name (last path segment of the hook's `cwd`). Tool names are bucketed into `read|search|edit|bash|web|agent|other` (`ToolCategory`).
 
-`GET /api/claude` returns `key=value` lines (`state, tool, project, mood, done, doneproject, tasks, sessions`) so the firmware needs no JSON library; `/api/claude/json` is the same for debugging. `POST /api/hook` takes the raw Claude Code hook JSON. `PostToolUseFailure` is mapped to `error` but is not registered in the user's hooks (unverified that Claude Code emits it).
+`GET /api/claude` returns `key=value` lines (`state, tool, project, mood, done, doneproject, tasks, sessions, waitmsg`) plus up to 6 `s=<id>|<name>|<state>|<doneCount>|<tool>` lines (stable order by session birth, duplicate project names get ` #n`) so the firmware needs no JSON library; `/api/claude/json` is the same for debugging. Each session carries its own done counter and the last `Notification` message. Sessions with no events for 2 h are forgotten and an abandoned `wait` expires after 20 min. `POST /api/hook` takes the raw Claude Code hook JSON. `PostToolUseFailure` is mapped to `error` but is not registered in the user's hooks (unverified that Claude Code emits it).
 
 ### Firmware (`firmware/src/main.cpp`)
 
@@ -79,8 +80,10 @@ Single file, Arduino framework on M5Unified/M5GFX (no LVGL, no Avatar library).
 - **Poses**: each state is a row in `POSES` (eye size/gap, lid cover, tilt, bottom lid, pupil, y-offset, RGB); `targetPose()` adjusts it per tool and per mood. All values are exponentially interpolated. Keep `tilt` small for `work`: a strong inward tilt reads as angry. The background colour also interpolates per state (`bgTarget`).
 - **Per-frame `Fx`**: layered effects (per-eye scale/lid/offset, gaze override, blush, yawn, sparkle, dizzy) are computed by `computeBehavior` (curious-personality micro-animations in idle/bored: look, tilt, wink, inspect, butterfly, yawn, laugh, shy, eye-roll, nod…) and `computeReaction` (IMU/button: dizzy, pet, startle), smoothed, then applied in `drawEye`. Reactions override behaviors.
 - **Tool-aware work**: gaze pattern (`updateGaze`) and bottom effect (`drawEffects`) depend on `curTool`.
-- **Task-done alert**: when the server's `done` counter increases (not on the first sync, not when it goes down after a server restart) the firmware sets `pending`, shows `✓ project` and a softly breathing border + background until the button is clicked.
+- **Task-done alerts (per session)**: `Track` keeps `seen`/`acked` done counters per session id (baseline at first sight, resync if the server restarts). Sessions with `done > acked` are pending: `✓ name` banner (with `n/N` when several), softly breathing border + background. Acking also cancels the `done` face.
+- **Button** (`handleButton`, no triple click to avoid latency): click = next / acknowledge (single pending) / boop; long press (≥350 ms, with a progress ring drawn around the screen perimeter, 900 ms) = acknowledge current when ≥2 pending, or open the session list when ≥2 sessions. In the list (`drawList`): click moves the cursor, long press selects (`auto` = aggregate, or *follow* that session; others needing permission still interrupt). The list closes after 7 s idle; a followed session that disappears reverts to auto with a toast.
+- **Wait screen**: `waitmsg` (what Claude asks permission for) scrolls as a marquee under the eyes.
 - **IMU** (`imuUpdate`): ≥4 spikes in 1 s → dizzy; one isolated spike (not near a button press) → pet; free-fall → startle. Thresholds are untuned guesses.
-- **Networking**: `netTask` (FreeRTOS, core 0) polls every second over a reused HTTPS connection (`setInsecure()`); the render loop on core 1 reads the copy under a spinlock. After 5 consecutive failures the face goes to `bored`.
-- Serial debug: `0`–`7` force a state, `T` cycles tool, `b` triggers the next micro-animation, `d` fake task-done, `k`/`h`/`s` reactions, `a` cancels the override.
+- **Networking/OTA**: `netTask` (FreeRTOS, core 0) polls every second over a reused HTTPS connection (`setInsecure()`); the render loop on core 1 reads the copy under a spinlock. `ArduinoOTA` is served from the same task (progress bar overlay while updating). After 5 consecutive failures the face goes to `bored`.
+- Serial debug: `0`–`7` force a state, `T` cycles tool, `b` triggers the next micro-animation, `k`/`h`/`s` reactions, `a` cancels the override.
 - Adding a state: extend `State`, `STATE_NAME` (must match the server's word), `POSES`, `bgTarget`, `updateGaze`, `drawEffects`, and the server's `Apply`/priority.
