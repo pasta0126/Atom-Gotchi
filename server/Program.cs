@@ -16,25 +16,41 @@ app.MapPost("/api/hook", (System.Text.Json.JsonElement body, ClaudeActivity acti
     return Results.Ok();
 });
 
+// ── Atom ─────────────────────────────────────────────────────────────────────
+
 // El Atom hace GET cada ~1 s. Formato clave=valor por líneas (fácil de parsear sin librerías JSON).
-// Las sesiones van como "s=<id>|<nombre>|<estado>|<tareas terminadas>|<herramienta>" (máx. 6, orden estable por aparición).
+// El servidor ya decide qué sesión se sigue y si hay atención pendiente; el Atom solo pinta.
 app.MapGet("/api/claude", (ClaudeActivity activity) =>
 {
     var s = activity.Snapshot();
-    // Los valores no pueden contener saltos de línea ni el separador '|'
-    static string Clean(string v, int max = 64)
-    {
-        var c = v.Replace('\n', ' ').Replace('\r', ' ').Replace('|', '/');
-        return c.Length > max ? c[..max] : c;
-    }
-    var sb = new System.Text.StringBuilder();
-    sb.Append($"state={s.State}\ntool={s.Tool}\nproject={Clean(s.Project)}\nmood={s.Mood}\n");
-    sb.Append($"done={s.DoneSeq}\ndoneproject={Clean(s.DoneProject)}\ntasks={s.TasksToday}\nsessions={s.Sessions}\n");
-    foreach (var x in s.List.Take(6)) sb.Append($"s={Clean(x.Id, 8)}|{Clean(x.Name, 24)}|{x.State}|{x.DoneSeq}|{x.Tool}\n");
-    return Results.Text(sb.ToString());
+    return Results.Text(
+        $"state={s.State}\ntool={s.Tool}\nmood={s.Mood}\nattn={(s.Attention ? 1 : 0)}\nattnseq={s.AttentionSeq}\nsessions={s.Sessions}\n");
 });
 
-// Versión JSON para depurar
+// El Atom confirma (cualquier pulsación) y se apaga el parpadeo de "tarea terminada"
+app.MapPost("/api/ack", (ClaudeActivity activity) => { activity.Ack(); return Results.Ok(); });
+
+// ── Elegir qué sesión sigue el gotchi ────────────────────────────────────────
+
+// Sesiones activas (id completo, nombre legible, estado, herramienta, tareas hechas, segundos sin actividad, si es la seguida)
+app.MapGet("/api/sessions", (ClaudeActivity activity) =>
+{
+    var (active, sessions) = activity.ListSessions();
+    return Results.Ok(new { active, sessions });
+});
+
+app.MapGet("/api/active", (ClaudeActivity activity) => Results.Ok(new { active = activity.ListSessions().Active }));
+
+// {"id": "<id | prefijo del id | nombre>"}  ·  {"id": "auto"} o {"id": null} = seguir todas (automático)
+app.MapPost("/api/active", (ActiveDto dto, ClaudeActivity activity) =>
+{
+    var r = activity.SetActive(dto.Id);
+    return r.Ok ? Results.Ok(new { active = r.Active }) : Results.NotFound(new { error = r.Error, active = r.Active });
+});
+
+// Versión JSON del estado completo, para depurar
 app.MapGet("/api/claude/json", (ClaudeActivity activity) => Results.Ok(activity.Snapshot()));
 
 app.Run();
+
+public record ActiveDto(string? Id);
