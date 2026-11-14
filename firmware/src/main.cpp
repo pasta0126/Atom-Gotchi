@@ -702,8 +702,9 @@ void loop() {
     float t = now / 1000.0f;
 
     // ── entrada: botón ──
-    if (M5.BtnA.wasPressed()) lastBtnAt = now;
-    if (M5.BtnA.wasClicked()) {
+    if (M5.BtnA.wasPressed()) {   // cualquier pulsación (corta o larga) responde al instante
+        lastBtnAt = now;
+        Serial.printf("button: pressed (pending=%d)\n", (int)pending);
         if (pending) { pending = false; startReaction(R_PET); }
         else startReaction(R_PET);   // boop
     }

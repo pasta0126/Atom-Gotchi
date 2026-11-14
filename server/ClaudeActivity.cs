@@ -21,6 +21,10 @@ public sealed class ClaudeActivity
     static readonly TimeSpan ErrorFor = TimeSpan.FromSeconds(4);
     // Una sesión "trabajando" sin eventos tanto tiempo se da por colgada (p. ej. Esc)
     static readonly TimeSpan WorkStale = TimeSpan.FromMinutes(5);
+    // Una sesión esperando permiso que no da señales tanto tiempo se da por abandonada (terminal cerrado)
+    static readonly TimeSpan WaitStale = TimeSpan.FromMinutes(20);
+    // Sesiones sin eventos durante tanto tiempo se olvidan (si no llegó SessionEnd)
+    static readonly TimeSpan ForgetAfter = TimeSpan.FromHours(2);
     static readonly TimeSpan BoredAfter = TimeSpan.FromMinutes(10);
     static readonly TimeSpan SleepAfter = TimeSpan.FromMinutes(30);
     // Memoria del humor
@@ -108,6 +112,7 @@ public sealed class ClaudeActivity
             "done"  => age > DoneFor  ? "idle" : "done",
             "error" => age > ErrorFor ? "idle" : "error",
             "work"  => age > WorkStale ? "idle" : "work",
+            "wait"  => age > WaitStale ? "idle" : "wait",
             _       => s.State,   // wait persiste hasta el siguiente evento
         };
     }
@@ -132,6 +137,8 @@ public sealed class ClaudeActivity
         var now = _now();
         lock (_lock)
         {
+            foreach (var k in _sessions.Where(kv => now - kv.Value.Since > ForgetAfter).Select(kv => kv.Key).ToList())
+                _sessions.Remove(k);
             var best = "idle"; var project = ""; var tool = "";
             foreach (var s in _sessions.Values)
             {
