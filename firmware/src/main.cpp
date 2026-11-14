@@ -771,18 +771,26 @@ static void drawList(uint32_t now) {
     }
 }
 
-// Anillo de progreso por el perímetro: pista tenue + relleno brillante (sentido horario desde arriba)
-static void drawRing(float p, uint16_t c) {
-    if (p <= 0.001f) return;
-    const uint16_t track = rgb(45, 55, 80);
-    canvas.fillRect(0, 0, 128, 4, track); canvas.fillRect(124, 0, 4, 128, track);
-    canvas.fillRect(0, 124, 128, 4, track); canvas.fillRect(0, 0, 4, 128, track);
-    int left = (int)(p * 512), l;
-    l = min(left, 64);  canvas.fillRect(64, 0, l, 4, c);            left -= l; if (left <= 0) return;   // arriba → derecha
-    l = min(left, 128); canvas.fillRect(124, 0, 4, l, c);           left -= l; if (left <= 0) return;   // derecha ↓
-    l = min(left, 128); canvas.fillRect(128 - l, 124, l, 4, c);     left -= l; if (left <= 0) return;   // abajo ←
-    l = min(left, 128); canvas.fillRect(0, 128 - l, 4, l, c);       left -= l; if (left <= 0) return;   // izquierda ↑
-    l = min(left, 64);  canvas.fillRect(0, 0, l, 4, c);                                                 // arriba → centro
+static const float COVER_MAX = 91.0f;                      // radio que cubre las esquinas de 128x128 desde el centro
+static float coverR = 0;                                   // radio actual del círculo
+static uint32_t fadeAt = 0, clickAt = 0;
+static uint16_t fadeColor = 0;
+
+// Color de la acción de pulsación larga: azul = abrir opciones, verde = aceptar la selección
+static uint16_t coverColor() { return ui == UI_LIST ? rgb(60, 200, 125) : rgb(75, 125, 225); }
+
+// Pulsación larga: un círculo crece desde el centro hasta cubrir toda la pantalla (la acción se dispara al llenarla).
+// Al soltar antes, se retira rápidamente. Tras completarse se desvanece revelando la nueva pantalla.
+// Cada click corto deja además un destello verde sutil.
+static void drawCover(uint32_t now) {
+    if (coverR > 1) {
+        uint16_t c = coverColor();
+        canvas.fillCircle(64, 64, (int)coverR, c);
+        canvas.drawCircle(64, 64, (int)coverR, TFT_WHITE);
+        if (coverR > 3) canvas.drawCircle(64, 64, (int)coverR - 1, TFT_WHITE);
+    }
+    if (now - fadeAt < 320) canvas.fillRectAlpha(0, 0, 128, 128, (uint8_t)(255 * (1.0f - (now - fadeAt) / 320.0f)), fadeColor);
+    if (now - clickAt < 280) canvas.fillRectAlpha(0, 0, 128, 128, (uint8_t)(70 * (1.0f - (now - clickAt) / 280.0f)), rgb(90, 255, 160));
 }
 
 static void drawToast(uint32_t now) {
@@ -800,12 +808,14 @@ static void drawToast(uint32_t now) {
 static uint32_t pressAt = 0, lastBtnAt = 0;
 static bool btnDown = false, longFired = false;
 static float ring = 0;
-static const uint32_t RING_START = 120, RING_END = 650;   // el anillo aparece a los 120 ms y se completa a los 650 ms
+static const uint32_t RING_START = 150, RING_END = 750;   // el círculo aparece a los 150 ms y cubre la pantalla a los 750 ms
 
 static bool longAvailable() { return ui == UI_LIST || R.nList >= 2; }
 
 // click: en la lista mueve el cursor; con avisos pendientes los confirma todos; si no, caricia
 static void doClick(uint32_t now) {
+    clickAt = now;                                                      // destello verde: el click se procesó
+    if (ui == UI_FACE && state != S_SLEEP) { blinking = true; blinkStart = now; }   // y un parpadeo
     if (ui == UI_LIST) { listCursor = (listCursor + 1) % (R.nList + 1); listLastInput = now; return; }
     if (nPend > 0) { ackAll(); startReaction(R_PET); return; }
     startReaction(R_PET);   // boop
@@ -813,6 +823,7 @@ static void doClick(uint32_t now) {
 
 // pulsación larga (anillo completo): abre la lista o, dentro de ella, selecciona la fila
 static void doLong(uint32_t now) {
+    fadeAt = now; fadeColor = coverColor(); coverR = 0;                 // el círculo se desvanece al completarse
     if (ui == UI_LIST) {
         if (listCursor == 0) { pinnedId[0] = 0; showToast("auto", now); }
         else { strlcpy(pinnedId, R.list[listCursor - 1].id, sizeof(pinnedId)); showToast(R.list[listCursor - 1].name, now); }
@@ -900,6 +911,7 @@ void loop() {
 
     // ── entrada: botón ──
     handleButton(now);
+    if (ring > 0) coverR = ring * COVER_MAX; else coverR = fmaxf(0.0f, coverR - dt * 700.0f);   // se retira si sueltas a medias
     if (ui == UI_LIST && (now - listLastInput > 10000 || R.nList < 2)) ui = UI_FACE;
 
     // ── entrada: serie (debug) ──
@@ -990,7 +1002,7 @@ void loop() {
     }
     drawBorder(now);
     drawToast(now);
-    drawRing(ring, rgb(255, 235, 150));
+    drawCover(now);
     if (otaPct >= 0) {   // progreso de actualización por WiFi
         canvas.fillRect(14, 58, 100, 12, rgb(20, 20, 30)); canvas.fillRect(16, 60, otaPct, 8, rgb(120, 220, 255));
         canvas.setFont(&fonts::Font2); canvas.setTextColor(TFT_WHITE); canvas.drawCenterString("OTA", 64, 40);
