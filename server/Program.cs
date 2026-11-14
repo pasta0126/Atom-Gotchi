@@ -32,21 +32,39 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI(o => { o.SwaggerEndpoint("/swagger/v1/swagger.json", "AtomGotchi API v1"); o.RoutePrefix = ""; o.DocumentTitle = "AtomGotchi API"; });
 
-// Auth: si el servidor tiene API_KEY, todos los /api/* exigen la cabecera X-Api-Key
+// Auth: si el servidor tiene API_KEY, todos los /api/* exigen la cabecera X-Api-Key.
+// Antifuerza bruta: 8 fallos desde la misma IP en 10 min bloquean esa IP 10 min (429), también con la clave buena.
 var apiKey = app.Configuration["API_KEY"];
 if (string.IsNullOrEmpty(apiKey)) app.Logger.LogWarning("API_KEY no configurada: los endpoints /api están SIN autenticación");
 var keyBytes = Encoding.UTF8.GetBytes(apiKey ?? "");
+var failures = new System.Collections.Concurrent.ConcurrentDictionary<string, (int Count, DateTime First)>();
+const int MaxFailures = 8; var failWindow = TimeSpan.FromMinutes(10);
 app.Use(async (ctx, next) =>
 {
     if (keyBytes.Length > 0 && ctx.Request.Path.StartsWithSegments("/api"))
     {
+        // Detrás de Traefik la IP real es la última de X-Forwarded-For (la añade Traefik; las anteriores las puede falsear el cliente)
+        var xff = ctx.Request.Headers["X-Forwarded-For"].ToString();
+        var ip = xff.Length > 0 ? xff.Split(',').Last().Trim() : ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
+        var now = DateTime.UtcNow;
+        if (failures.TryGetValue(ip, out var f) && now - f.First >= failWindow) { failures.TryRemove(ip, out _); f = default; }
+        if (f.Count >= MaxFailures)
+        {
+            ctx.Response.Headers.RetryAfter = ((int)(failWindow - (now - f.First)).TotalSeconds).ToString();
+            ctx.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            await ctx.Response.WriteAsJsonAsync(new { error = "demasiados intentos fallidos; espera unos minutos" });
+            return;
+        }
         var given = Encoding.UTF8.GetBytes(ctx.Request.Headers["X-Api-Key"].ToString());
         if (given.Length != keyBytes.Length || !CryptographicOperations.FixedTimeEquals(given, keyBytes))
         {
+            failures.AddOrUpdate(ip, (1, now), (_, old) => (old.Count + 1, old.First));
+            app.Logger.LogWarning("Clave incorrecta desde {Ip}", ip);
             ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
             await ctx.Response.WriteAsJsonAsync(new { error = "falta o es incorrecta la cabecera X-Api-Key" });
             return;
         }
+        failures.TryRemove(ip, out _);
     }
     await next();
 });

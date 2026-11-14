@@ -56,7 +56,7 @@ There is no CI; deploys are manual. The API key lives in `~/atom-gotchi/server/.
 
 ### API auth and Swagger
 
-Swagger UI is served at the domain root (`https://atom-api.northernarchive.com/`; the OpenAPI JSON at `/swagger/v1/swagger.json` is public). Every `/api/*` endpoint requires the header `X-Api-Key` when the server has `API_KEY` set (401 otherwise; empty = no auth, with a startup warning). In Swagger press **Authorize** and paste the key. The key is also in: `firmware/src/credentials.h` (`API_KEY`, sent by the Atom) and `~/.config/atom-gotchi/key` on the dev Mac (read by `hooks/gotchi-hook.sh` and `hooks/gotchi-session.sh`; override the path with `GOTCHI_KEY_FILE`). To rotate: change it in all three places, flash the Atom first and redeploy the server last, to avoid a window of 401s.
+Swagger UI is served at the domain root (`https://atom-api.northernarchive.com/`; the OpenAPI JSON at `/swagger/v1/swagger.json` is public). Every `/api/*` endpoint requires the header `X-Api-Key` when the server has `API_KEY` set (401 otherwise; empty = no auth, with a startup warning). Brute-force protection: 8 wrong keys from one IP within 10 min block that IP for 10 min (429, even with the right key; a server restart clears it; the real IP is the last `X-Forwarded-For` entry added by Traefik). The key must be ASCII (HTTP header). In Swagger press **Authorize** and paste the key. The key is also in: `firmware/src/credentials.h` (`API_KEY`, sent by the Atom) and `~/.config/atom-gotchi/key` on the dev Mac (read by `hooks/gotchi-hook.sh` and `hooks/gotchi-session.sh`; override the path with `GOTCHI_KEY_FILE`). To rotate: change it in all three places, flash the Atom first and redeploy the server last, to avoid a window of 401s.
 
 ### Hooks
 
