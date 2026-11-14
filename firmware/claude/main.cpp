@@ -197,11 +197,16 @@ static int parseState(const String& b) {
 static void netTask(void*) {
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(true);
+    int n = WiFi.scanNetworks();
+    for (int i = 0; i < n; i++) Serial.printf("scan: '%s' ch%d rssi%d auth%d\n", WiFi.SSID(i).c_str(), WiFi.channel(i), WiFi.RSSI(i), WiFi.encryptionType(i));
     WiFi.begin(WIFI_SSID, WIFI_PASS);
-    int fails = 0;
+    int fails = 0, waited = 0;
     for (;;) {
         wifiUp = WiFi.status() == WL_CONNECTED;
-        if (!wifiUp) { vTaskDelay(pdMS_TO_TICKS(1000)); continue; }
+        if (!wifiUp) {
+            if (++waited % 3 == 0) Serial.printf("wifi status=%d (ssid len=%d)\n", (int)WiFi.status(), (int)strlen(WIFI_SSID));
+            vTaskDelay(pdMS_TO_TICKS(1000)); continue;
+        }
         HTTPClient http;
         http.setConnectTimeout(1000);
         http.setTimeout(1500);
