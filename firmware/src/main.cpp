@@ -140,6 +140,7 @@ static void netTask(void*) {
             ArduinoOTA.onEnd([]() { otaPct = 100; });
             ArduinoOTA.onError([](ota_error_t) { otaPct = -1; });
             ArduinoOTA.begin();
+            configTzTime("CET-1CEST,M3.5.0,M10.5.0/3", "pool.ntp.org", "time.google.com");   // hora local
             otaStarted = true;
         }
         http.setConnectTimeout(3000);
@@ -332,8 +333,8 @@ static void computeBehavior(Fx& fx, uint32_t now, float t) {
 }
 
 // Reacciones físicas (IMU / botón): se superponen al estado
-enum React : uint8_t { R_NONE, R_DIZZY, R_PET, R_STARTLE };
-static const uint16_t REACT_MS[4] = {0, 3000, 2200, 1200};
+enum React : uint8_t { R_NONE, R_DIZZY, R_PET, R_STARTLE, R_GREET };
+static const uint16_t REACT_MS[5] = {0, 3000, 2200, 1200, 2800};
 static React react = R_NONE;
 static uint32_t reactStart = 0;
 
@@ -356,6 +357,10 @@ static void computeReaction(Fx& fx, uint32_t now, float t) {
         case R_PET:
             fx.botAdd = 0.65f * fminf(1.0f, e * 2.5f); fx.pupilMul = 1.15f; fx.oy = 2 * e; fx.blush = e;
             fx.gazeOv = true; fx.gx = 0; fx.gy = 0;
+            break;
+        case R_GREET:   // buenos días: ojos felices con destellos
+            fx.sparkle = e > 0.15f; fx.botAdd = 0.45f * e; fx.pupilMul = 1.15f; fx.oy = -1.5f * e;
+            fx.gazeOv = true; fx.gx = 0; fx.gy = -0.2f;
             break;
         case R_STARTLE:
             fx.scale[0] = fx.scale[1] = 1 + 0.25f * (1 - p); fx.pupilMul = 0.55f; fx.dy[0] = fx.dy[1] = -3 * (1 - p);
@@ -597,6 +602,14 @@ static void drawOverlays(float t, uint32_t now) {
             float ph = clamp01(p * 1.3f - i * 0.18f);
             if (ph <= 0 || ph >= 1) continue;
             drawHeart(34 + i * 30 + (int)(sinf(ph * 8 + i) * 4), 92 - (int)(ph * 60), 3 + (i & 1), rgb(255, 110 + 40 * ph, 150));
+        }
+    } else if (react == R_GREET) {   // sol saliendo con rayos
+        float p = (now - reactStart) / (float)REACT_MS[R_GREET];
+        int sy = 40 - (int)(22 * clamp01(p * 3));
+        canvas.fillCircle(106, sy, 8, rgb(255, 220, 100));
+        for (int k = 0; k < 8; k++) {
+            float a = t * 1.5f + k * 0.785f;
+            canvas.drawLine(106 + (int)(cosf(a) * 12), sy + (int)(sinf(a) * 12), 106 + (int)(cosf(a) * 17), sy + (int)(sinf(a) * 17), rgb(255, 230, 130));
         }
     } else if (react == R_STARTLE) {
         canvas.setFont(&fonts::Font4); canvas.setTextColor(rgb(255, 240, 150));
@@ -969,6 +982,16 @@ void loop() {
         else if (c == 'b') { behCycle = behCycle % (B_COUNT - 1) + 1; behForce = behCycle; beh = B_NONE; state = S_IDLE; overrideUntil = now + 10000; }
     }
 
+    // ── hora local (NTP): noche = horas de silencio ──
+    static int hourNow = -1, todayYday = -1, lastGreetDay = -1;
+    static uint32_t lastTimeCheck = 0;
+    if (now - lastTimeCheck > 1000) {
+        lastTimeCheck = now;
+        time_t tt = time(nullptr);
+        if (tt > 1700000000) { tm ti; localtime_r(&tt, &ti); hourNow = ti.tm_hour; todayYday = ti.tm_yday; }
+    }
+    const bool night = hourNow >= 0 && (hourNow >= 23 || hourNow < 7);
+
     // ── datos remotos ──
     portENTER_CRITICAL(&remoteMux); R = remote; portEXIT_CRITICAL(&remoteMux);
     const Remote& r = R;
@@ -987,7 +1010,15 @@ void loop() {
             }
         }
         if (rs == S_DONE && !pending) rs = S_IDLE;   // ya confirmada: no repetir la cara de "terminado"
-        if (rs >= 0 && rs != state) setState((State)rs);
+        if (night && (rs == S_IDLE || rs == S_BORED)) rs = S_SLEEP;   // de noche duerme en vez de aburrirse
+        if (rs >= 0 && rs != state) {
+            // saludo: primera actividad de la mañana
+            if (hourNow >= 5 && hourNow < 13 && todayYday != lastGreetDay && (rs == S_ALERT || rs == S_WORK) &&
+                (state == S_SLEEP || state == S_BORED || state == S_IDLE)) {
+                lastGreetDay = todayYday; startReaction(R_GREET); showToast("buenos dias", now);
+            }
+            setState((State)rs);
+        }
         curTool = rt;
     } else if (toolOverride >= 0) curTool = (Tool)toolOverride;
 
@@ -1015,7 +1046,8 @@ void loop() {
     gazeY = approach(gazeY, gazeTY, 16.0f, dt);
 
     // brillo: solo se atenúa al dormir
-    int bright = (state == S_SLEEP && !pending) ? 30 : 140;   // solo se atenúa de noche
+    int bright = night ? 45 : 140;                              // horas de silencio: pantalla tenue
+    if (state == S_SLEEP && !pending) bright = night ? 15 : 30;
     setBrightnessIfChanged(bright);
 
     // ── render ──
@@ -1058,9 +1090,9 @@ void loop() {
 
     accRender += r1 - r0; accPush += r2 - r1; frames++;
     if (now - lastReport >= 2000) {
-        Serial.printf("fps=%.1f render=%.1fms push=%.1fms heap=%u wifi=%d state=%s tool=%s mood=%d |a|=%.2f\n",
+        Serial.printf("fps=%.1f render=%.1fms push=%.1fms heap=%u wifi=%d state=%s tool=%s mood=%d hour=%d |a|=%.2f\n",
                       frames * 1000.0f / (now - lastReport), accRender / 1000.0f / frames, accPush / 1000.0f / frames,
-                      ESP.getFreeHeap(), (int)wifiUp, STATE_NAME[state], TOOL_NAME[curTool], mood, lastMag);
+                      ESP.getFreeHeap(), (int)wifiUp, STATE_NAME[state], TOOL_NAME[curTool], mood, hourNow, lastMag);
         accRender = accPush = frames = 0; lastReport = now;
     }
     int32_t spare = 16 - (int32_t)((micros() - r0) / 1000);   // ~60 fps
