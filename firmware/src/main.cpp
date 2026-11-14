@@ -810,12 +810,52 @@ static bool btnDown = false, longFired = false;
 static float ring = 0;
 static const uint32_t RING_START = 150, RING_END = 750;   // el círculo aparece a los 150 ms y cubre la pantalla a los 750 ms
 
-static bool longAvailable() { return ui == UI_LIST || R.nList >= 2; }
+// ── Depuración del botón: pantalla que muestra lo que lee el firmware (serie 'x' o -DBUTTON_DEBUG) ──
+struct BtnEvt { char kind[8]; uint32_t held; };
+static BtnEvt btnHist[4];
+static uint32_t nClick = 0, nLong = 0, nPress = 0, lastHeld = 0;
+#ifdef BUTTON_DEBUG
+static bool dbgScreen = true;
+#else
+static bool dbgScreen = false;
+#endif
+static void dbgPush(const char* kind, uint32_t held) {
+    for (int i = 3; i > 0; i--) btnHist[i] = btnHist[i - 1];
+    strlcpy(btnHist[0].kind, kind, sizeof(btnHist[0].kind)); btnHist[0].held = held;
+}
+
+static void drawBtnDebug(uint32_t now) {
+    bool down = M5.BtnA.isPressed();
+    int raw = digitalRead(41);                       // GPIO del botón (activo en bajo)
+    canvas.setFont(&fonts::Font2); canvas.setTextSize(1);
+    canvas.setTextColor(rgb(150, 170, 200)); canvas.drawString("BTN DEBUG", 8, 3);
+    canvas.fillCircle(20, 40, 13, down ? rgb(90, 255, 160) : rgb(25, 30, 45));
+    canvas.drawCircle(20, 40, 13, down ? (uint16_t)TFT_WHITE : rgb(70, 80, 100));
+    uint32_t held = down ? now - pressAt : lastHeld;
+    char b[16]; snprintf(b, sizeof(b), "%u", (unsigned)held);
+    canvas.setFont(&fonts::Font4); canvas.setTextColor(down ? (uint16_t)TFT_WHITE : rgb(120, 135, 160));
+    canvas.drawString(b, 42, 26);
+    int w = canvas.textWidth(b);
+    canvas.setFont(&fonts::Font2); canvas.drawString("ms", 46 + w, 33);
+    bool mismatch = down != (raw == 0);
+    char l[32]; snprintf(l, sizeof(l), "gpio41=%d btnA=%d", raw, (int)down);
+    canvas.setTextColor(mismatch ? rgb(255, 190, 90) : rgb(130, 150, 180)); canvas.drawString(l, 6, 60);
+    snprintf(l, sizeof(l), "click %u long %u", (unsigned)nClick, (unsigned)nLong);
+    canvas.setTextColor(rgb(170, 190, 220)); canvas.drawString(l, 6, 76);
+    for (int i = 0; i < 2; i++) {
+        if (!btnHist[i].kind[0]) break;
+        snprintf(l, sizeof(l), "%s %ums", btnHist[i].kind, (unsigned)btnHist[i].held);
+        canvas.setTextColor(btnHist[i].kind[0] == 'L' ? rgb(110, 170, 255) : rgb(120, 255, 170)); canvas.drawString(l, 6, 94 + i * 16);
+    }
+}
+
+static bool longAvailable() { return dbgScreen || ui == UI_LIST || R.nList >= 2; }
 
 // click: en la lista mueve el cursor; con avisos pendientes los confirma todos; si no, caricia
 static void doClick(uint32_t now) {
     clickAt = now;                                                      // destello verde: el click se procesó
     if (ui == UI_FACE && state != S_SLEEP) { blinking = true; blinkStart = now; }   // y un parpadeo
+    if (dbgScreen) return;
     if (ui == UI_LIST) { listCursor = (listCursor + 1) % (R.nList + 1); listLastInput = now; return; }
     if (nPend > 0) { ackAll(); startReaction(R_PET); return; }
     startReaction(R_PET);   // boop
@@ -824,6 +864,7 @@ static void doClick(uint32_t now) {
 // pulsación larga (anillo completo): abre la lista o, dentro de ella, selecciona la fila
 static void doLong(uint32_t now) {
     fadeAt = now; fadeColor = coverColor(); coverR = 0;                 // el círculo se desvanece al completarse
+    if (dbgScreen) return;
     if (ui == UI_LIST) {
         if (listCursor == 0) { pinnedId[0] = 0; showToast("auto", now); }
         else { strlcpy(pinnedId, R.list[listCursor - 1].id, sizeof(pinnedId)); showToast(R.list[listCursor - 1].name, now); }
@@ -838,16 +879,17 @@ static void doLong(uint32_t now) {
 
 // Sin zona muerta: soltar antes de completar el anillo = click; completarlo = pulsación larga.
 static void handleButton(uint32_t now) {
-    if (M5.BtnA.wasPressed()) { pressAt = now; btnDown = true; longFired = false; lastBtnAt = now; Serial.printf("button: pressed (nPend=%d list=%d ui=%d)\n", nPend, (int)R.nList, (int)ui); }
+    if (M5.BtnA.wasPressed()) { pressAt = now; btnDown = true; longFired = false; lastBtnAt = now; nPress++; Serial.printf("button: pressed #%u (nPend=%d list=%d ui=%d)\n", (unsigned)nPress, nPend, (int)R.nList, (int)ui); }
     ring = 0;
     if (btnDown && M5.BtnA.isPressed() && !longFired && longAvailable() && now - pressAt >= RING_START) {
         ring = clamp01((now - pressAt - RING_START) / (float)(RING_END - RING_START));
         listLastInput = now;   // la lista no se cierra mientras se está pulsando
-        if (ring >= 1) { longFired = true; ring = 0; Serial.println("button: long"); doLong(now); }
+        if (ring >= 1) { longFired = true; ring = 0; nLong++; dbgPush("LONG", now - pressAt); Serial.printf("button: LONG after %ums\n", (unsigned)(now - pressAt)); doLong(now); }
     }
     if (btnDown && M5.BtnA.wasReleased()) {
-        btnDown = false;
-        if (!longFired) { Serial.println("button: click"); doClick(now); }
+        btnDown = false; lastHeld = now - pressAt;
+        if (!longFired) { nClick++; dbgPush("click", lastHeld); Serial.printf("button: click (held %ums)\n", (unsigned)lastHeld); doClick(now); }
+        else Serial.printf("button: released after long (held %ums)\n", (unsigned)lastHeld);
     }
 }
 
@@ -918,6 +960,7 @@ void loop() {
     while (Serial.available()) {
         int c = Serial.read();
         if (c >= '0' && c < '0' + S_COUNT) { overrideUntil = now + 10000; setState((State)(c - '0')); }
+        else if (c == 'x') { dbgScreen = !dbgScreen; Serial.printf("button debug screen: %d\n", (int)dbgScreen); }
         else if (c == 'a') { overrideUntil = 0; toolOverride = -1; }
         else if (c == 'T') { toolOverride = (toolOverride + 1) % T_COUNT; overrideUntil = now + 10000; setState(S_WORK); Serial.printf("tool=%s\n", TOOL_NAME[toolOverride]); }
         else if (c == 'k') startReaction(R_DIZZY);
@@ -982,7 +1025,8 @@ void loop() {
     uint16_t bg = rgb(bgCur[0], bgCur[1], bgCur[2]);
     canvas.fillScreen(bg);
 
-    if (ui == UI_LIST) drawList(now);
+    if (dbgScreen) drawBtnDebug(now);
+    else if (ui == UI_LIST) drawList(now);
     else {
     float breathe = 1.0f + 0.025f * sinf(t * 2.0f);
     float b = blinkFactor(now);
