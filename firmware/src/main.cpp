@@ -595,6 +595,7 @@ static void drawOverlays(float t, uint32_t now) {
 // Aviso de tarea terminada (pendiente hasta pulsar el botón) y flashes
 // ─────────────────────────────────────────────────────────────────────────────
 static long lastDoneSeen = -1;
+static long ackedDone = -1;      // última tarea confirmada con el botón
 static bool pending = false;
 static char pendingProject[32] = "";
 static uint32_t pendingSince = 0;
@@ -705,7 +706,7 @@ void loop() {
     if (M5.BtnA.wasPressed()) {   // cualquier pulsación (corta o larga) responde al instante
         lastBtnAt = now;
         Serial.printf("button: pressed (pending=%d)\n", (int)pending);
-        if (pending) { pending = false; startReaction(R_PET); }
+        if (pending) { pending = false; ackedDone = lastDoneSeen; startReaction(R_PET); }
         else startReaction(R_PET);   // boop
     }
 
@@ -733,7 +734,9 @@ void loop() {
     }
     if (now >= overrideUntil) {
         toolOverride = -1;
-        if (r.state >= 0 && r.state != state) setState((State)r.state);
+        int rs = r.state;
+        if (rs == S_DONE && r.done == ackedDone) rs = S_IDLE;   // ya confirmada: no repetir la cara de "terminado"
+        if (rs >= 0 && rs != state) setState((State)rs);
         curTool = (Tool)r.tool;
     } else if (toolOverride >= 0) curTool = (Tool)toolOverride;
 
