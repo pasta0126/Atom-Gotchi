@@ -63,7 +63,6 @@ struct Remote {
     int8_t  state = -1;       // -1 = sin datos todavía
     uint8_t tool = T_NONE;
     int8_t  mood = 0;         // -2..2
-    char    waitMsg[84] = "";
     uint8_t nList = 0;
     Sess    list[MAX_SESS];
 };
@@ -84,7 +83,7 @@ static void parseBody(const String& body, Remote& r) {
         if (s >= 0) r.state = s;
         return;
     }
-    r.nList = 0; r.waitMsg[0] = 0;
+    r.nList = 0;
     int pos = 0;
     while (pos < (int)body.length()) {
         int nl = body.indexOf('\n', pos);
@@ -98,7 +97,6 @@ static void parseBody(const String& body, Remote& r) {
         if (k == "state") { int s = indexOf(STATE_NAME, S_COUNT, v); if (s >= 0) r.state = s; }
         else if (k == "tool") { int t = indexOf(TOOL_NAME, T_COUNT, v); r.tool = t >= 0 ? t : T_NONE; }
         else if (k == "mood") r.mood = constrain(v.toInt(), -2, 2);
-        else if (k == "waitmsg") strlcpy(r.waitMsg, v.c_str(), sizeof(r.waitMsg));
         else if (k == "s" && r.nList < MAX_SESS) {   // id|nombre|estado|tareas|herramienta
             Sess& x = r.list[r.nList];
             int a = v.indexOf('|'), b = v.indexOf('|', a + 1), c = v.indexOf('|', b + 1), d = v.indexOf('|', c + 1);
@@ -641,7 +639,7 @@ struct Track { char id[8]; long seen; long acked; bool used; };
 static Track tracks[8];
 static int pend[MAX_SESS];       // índices de R.list con tareas sin confirmar
 static int nPend = 0;
-static int pendIdx = 0;
+static char lastAlertId[8] = "";     // sesión cuyo aviso es el más reciente
 
 static int findSess(const char* id) {
     for (int i = 0; i < R.nList; i++) if (!strcmp(R.list[i].id, id)) return i;
@@ -664,16 +662,17 @@ static void computePending(uint32_t now) {
         if (!t) continue;
         long d = R.list[i].done;
         if (d < t->seen) { t->seen = t->acked = d; }                   // el servidor se reinició
-        if (d > t->seen) { t->seen = d; pendingSince = now; Serial.printf("done alert: %s\n", R.list[i].name); }
+        if (d > t->seen) { t->seen = d; pendingSince = now; strlcpy(lastAlertId, R.list[i].id, sizeof(lastAlertId)); Serial.printf("done alert: %s\n", R.list[i].name); }
         if (d > t->acked && nPend < MAX_SESS) pend[nPend++] = i;
     }
-    if (pendIdx >= nPend) pendIdx = 0;
     pending = nPend > 0;
 }
 
-static void ackSession(int listIdx) {
-    Track* t = trackFor(R.list[listIdx].id, R.list[listIdx].done);
-    if (t) t->acked = R.list[listIdx].done;
+static void ackAll() {   // un click confirma todas las pendientes
+    for (int q = 0; q < nPend; q++) {
+        Track* t = trackFor(R.list[pend[q]].id, R.list[pend[q]].done);
+        if (t) t->acked = R.list[pend[q]].done;
+    }
 }
 
 // Borde que "respira": más vivo los primeros 12 s tras terminar, luego más lento y tenue.
@@ -701,12 +700,14 @@ static void fitText(char* buf, int maxW) {
 
 static void drawBanner(float t) {
     if (!pending || ui == UI_LIST) return;
+    int show = pend[0];                                        // la sesión que terminó más recientemente
+    for (int q = 0; q < nPend; q++) if (!strcmp(R.list[pend[q]].id, lastAlertId)) show = pend[q];
     char buf[40];
-    const char* nm = R.list[pend[pendIdx]].name;
+    const char* nm = R.list[show].name;
     strlcpy(buf, nm[0] ? nm : "listo", sizeof(buf));
     canvas.setFont(&fonts::Font2); canvas.setTextSize(1);
-    fitText(buf, nPend > 1 ? 72 : 96);
-    char badge[8] = ""; if (nPend > 1) snprintf(badge, sizeof(badge), "%d/%d", pendIdx + 1, nPend);
+    fitText(buf, nPend > 1 ? 66 : 96);
+    char badge[8] = ""; if (nPend > 1) snprintf(badge, sizeof(badge), "+%d", nPend - 1);
     int bw = badge[0] ? canvas.textWidth(badge) + 6 : 0;
     int tw = canvas.textWidth(buf) + 16 + bw;
     int x = 64 - tw / 2;
@@ -717,15 +718,14 @@ static void drawBanner(float t) {
     if (badge[0]) { canvas.setTextColor(rgb(120, 200, 160)); canvas.drawString(badge, x + 15 + canvas.textWidth(buf) + 6, 105); }
 }
 
-// Mensaje de la notificación (qué pide permiso Claude), en marquesina
+// "waiting" con tres puntos animados mientras Claude espera una respuesta tuya
 static void drawWaitMsg(float t) {
-    if (state != S_WAIT || !R.waitMsg[0] || pending || ui == UI_LIST) return;
-    canvas.setClipRect(4, 102, 120, 20);
+    if (state != S_WAIT || pending || ui == UI_LIST) return;
     canvas.setFont(&fonts::Font2); canvas.setTextSize(1); canvas.setTextColor(rgb(255, 225, 150));
-    int tw = canvas.textWidth(R.waitMsg);
-    if (tw <= 118) canvas.drawCenterString(R.waitMsg, 64, 105);
-    else canvas.drawString(R.waitMsg, 124 - (int)fmodf(t * 32, (float)(tw + 124)), 105);
-    canvas.clearClipRect();
+    int full = canvas.textWidth("waiting..."), x = 64 - full / 2;
+    canvas.drawString("waiting", x, 106);
+    int dx = x + canvas.textWidth("waiting"), dots = 1 + ((int)(t * 2.5f) % 3);
+    for (int i = 0; i < dots; i++) canvas.fillCircle(dx + 3 + i * 6, 119, 1, rgb(255, 225, 150));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -771,19 +771,18 @@ static void drawList(uint32_t now) {
     }
 }
 
-// Anillo de progreso por el perímetro de la pantalla (pulsación larga)
+// Anillo de progreso por el perímetro: pista tenue + relleno brillante (sentido horario desde arriba)
 static void drawRing(float p, uint16_t c) {
     if (p <= 0.001f) return;
-    struct Seg { int x0, y0, dx, dy, len; };
-    static const Seg segs[5] = {{64, 2, 1, 0, 61}, {125, 2, 0, 1, 123}, {125, 125, -1, 0, 123}, {2, 125, 0, -1, 123}, {2, 2, 1, 0, 62}};
-    float left = p * 492;
-    for (const Seg& sg : segs) {
-        if (left <= 0) break;
-        int l = (int)fminf((float)sg.len, left); left -= sg.len;
-        int x1 = sg.x0 + sg.dx * l, y1 = sg.y0 + sg.dy * l;
-        canvas.fillRect(min(sg.x0, x1) - (sg.dy ? 1 : 0), min(sg.y0, y1) - (sg.dx ? 1 : 0),
-                        abs(x1 - sg.x0) + (sg.dy ? 3 : 1), abs(y1 - sg.y0) + (sg.dx ? 3 : 1), c);
-    }
+    const uint16_t track = rgb(45, 55, 80);
+    canvas.fillRect(0, 0, 128, 4, track); canvas.fillRect(124, 0, 4, 128, track);
+    canvas.fillRect(0, 124, 128, 4, track); canvas.fillRect(0, 0, 4, 128, track);
+    int left = (int)(p * 512), l;
+    l = min(left, 64);  canvas.fillRect(64, 0, l, 4, c);            left -= l; if (left <= 0) return;   // arriba → derecha
+    l = min(left, 128); canvas.fillRect(124, 0, 4, l, c);           left -= l; if (left <= 0) return;   // derecha ↓
+    l = min(left, 128); canvas.fillRect(128 - l, 124, l, 4, c);     left -= l; if (left <= 0) return;   // abajo ←
+    l = min(left, 128); canvas.fillRect(0, 128 - l, 4, l, c);       left -= l; if (left <= 0) return;   // izquierda ↑
+    l = min(left, 64);  canvas.fillRect(0, 0, l, 4, c);                                                 // arriba → centro
 }
 
 static void drawToast(uint32_t now) {
@@ -801,17 +800,18 @@ static void drawToast(uint32_t now) {
 static uint32_t pressAt = 0, lastBtnAt = 0;
 static bool btnDown = false, longFired = false;
 static float ring = 0;
-static const uint32_t RING_DELAY = 350, RING_MS = 900;
+static const uint32_t RING_START = 120, RING_END = 650;   // el anillo aparece a los 120 ms y se completa a los 650 ms
 
-static bool longAvailable() { return ui == UI_LIST || nPend >= 2 || (nPend == 0 && R.nList >= 2); }
+static bool longAvailable() { return ui == UI_LIST || R.nList >= 2; }
 
+// click: en la lista mueve el cursor; con avisos pendientes los confirma todos; si no, caricia
 static void doClick(uint32_t now) {
     if (ui == UI_LIST) { listCursor = (listCursor + 1) % (R.nList + 1); listLastInput = now; return; }
-    if (nPend == 1) { ackSession(pend[0]); startReaction(R_PET); return; }
-    if (nPend >= 2) { pendIdx = (pendIdx + 1) % nPend; return; }
+    if (nPend > 0) { ackAll(); startReaction(R_PET); return; }
     startReaction(R_PET);   // boop
 }
 
+// pulsación larga (anillo completo): abre la lista o, dentro de ella, selecciona la fila
 static void doLong(uint32_t now) {
     if (ui == UI_LIST) {
         if (listCursor == 0) { pinnedId[0] = 0; showToast("auto", now); }
@@ -819,23 +819,24 @@ static void doLong(uint32_t now) {
         Serial.printf("follow: %s\n", pinnedId[0] ? pinnedId : "auto");
         ui = UI_FACE; startReaction(R_PET); return;
     }
-    if (nPend >= 2) { ackSession(pend[pendIdx]); pendIdx = 0; startReaction(R_PET); return; }
     if (R.nList >= 2) {
         ui = UI_LIST; listLastInput = now;
         int pi = pinnedId[0] ? findSess(pinnedId) : -1; listCursor = pi >= 0 ? pi + 1 : 0;
     }
 }
 
+// Sin zona muerta: soltar antes de completar el anillo = click; completarlo = pulsación larga.
 static void handleButton(uint32_t now) {
-    if (M5.BtnA.wasPressed()) { pressAt = now; btnDown = true; longFired = false; lastBtnAt = now; Serial.printf("button: pressed (nPend=%d list=%d)\n", nPend, (int)R.nList); }
+    if (M5.BtnA.wasPressed()) { pressAt = now; btnDown = true; longFired = false; lastBtnAt = now; Serial.printf("button: pressed (nPend=%d list=%d ui=%d)\n", nPend, (int)R.nList, (int)ui); }
     ring = 0;
-    if (btnDown && M5.BtnA.isPressed() && !longFired && longAvailable() && now - pressAt >= RING_DELAY) {
-        ring = clamp01((now - pressAt - RING_DELAY) / (float)RING_MS);
-        if (ring >= 1) { longFired = true; ring = 0; doLong(now); }
+    if (btnDown && M5.BtnA.isPressed() && !longFired && longAvailable() && now - pressAt >= RING_START) {
+        ring = clamp01((now - pressAt - RING_START) / (float)(RING_END - RING_START));
+        listLastInput = now;   // la lista no se cierra mientras se está pulsando
+        if (ring >= 1) { longFired = true; ring = 0; Serial.println("button: long"); doLong(now); }
     }
     if (btnDown && M5.BtnA.wasReleased()) {
         btnDown = false;
-        if (!longFired && (now - pressAt < RING_DELAY || !longAvailable())) doClick(now);
+        if (!longFired) { Serial.println("button: click"); doClick(now); }
     }
 }
 
@@ -899,7 +900,7 @@ void loop() {
 
     // ── entrada: botón ──
     handleButton(now);
-    if (ui == UI_LIST && (now - listLastInput > 7000 || R.nList < 2)) ui = UI_FACE;
+    if (ui == UI_LIST && (now - listLastInput > 10000 || R.nList < 2)) ui = UI_FACE;
 
     // ── entrada: serie (debug) ──
     while (Serial.available()) {
@@ -982,7 +983,7 @@ void loop() {
         float cx = 64 + (i ? dx : -dx) + fxSm[6];
         drawEye(i, cx, cy + fxSm[4 + i], w, h, cur, fxSm[2 + i], fxSm[9], fxSm[8], fxRaw.dizzy, fxRaw.sparkle, t, bg);
     }
-    drawEffects(t, !pending && !(state == S_WAIT && R.waitMsg[0]));
+    drawEffects(t, !pending);
     drawOverlays(t, now);
     drawBanner(t);
     drawWaitMsg(t);

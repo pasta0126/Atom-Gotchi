@@ -12,7 +12,7 @@ app.MapPost("/api/hook", (System.Text.Json.JsonElement body, ClaudeActivity acti
         && body.TryGetProperty(k, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
     var ev = Get("hook_event_name");
     if (ev is null) return Results.BadRequest(new { error = "falta hook_event_name" });
-    activity.Apply(ev, Get("session_id"), Get("cwd"), Get("tool_name"), Get("message"));
+    activity.Apply(ev, Get("session_id"), Get("cwd"), Get("tool_name"));
     return Results.Ok();
 });
 
@@ -30,7 +30,6 @@ app.MapGet("/api/claude", (ClaudeActivity activity) =>
     var sb = new System.Text.StringBuilder();
     sb.Append($"state={s.State}\ntool={s.Tool}\nproject={Clean(s.Project)}\nmood={s.Mood}\n");
     sb.Append($"done={s.DoneSeq}\ndoneproject={Clean(s.DoneProject)}\ntasks={s.TasksToday}\nsessions={s.Sessions}\n");
-    sb.Append($"waitmsg={Clean(s.WaitMsg, 80)}\n");
     foreach (var x in s.List.Take(6)) sb.Append($"s={Clean(x.Id, 8)}|{Clean(x.Name, 24)}|{x.State}|{x.DoneSeq}|{x.Tool}\n");
     return Results.Text(sb.ToString());
 });

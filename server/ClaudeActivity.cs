@@ -12,7 +12,6 @@ public record ClaudeSnapshot(
     string DoneProject, // proyecto de la última tarea terminada
     int TasksToday,
     int Sessions,
-    string WaitMsg,                       // mensaje de la notificación de la sesión dominante en wait
     IReadOnlyList<SessionInfo> List);     // sesiones, la más reciente primero
 
 // Agrega la actividad de todas las sesiones de Claude Code (vía hooks) en un único
@@ -34,7 +33,7 @@ public sealed class ClaudeActivity
     // Memoria del humor
     static readonly TimeSpan ErrorMemory = TimeSpan.FromMinutes(10);
 
-    record Session(string State, DateTime Since, string Project, string Tool, long Done = 0, string Msg = "", DateTime Born = default);
+    record Session(string State, DateTime Since, string Project, string Tool, long Done = 0, DateTime Born = default);
 
     readonly object _lock = new();
     readonly Dictionary<string, Session> _sessions = new();
@@ -71,7 +70,7 @@ public sealed class ClaudeActivity
         _ => "other",
     };
 
-    public void Apply(string eventName, string? sessionId, string? cwd = null, string? toolName = null, string? message = null)
+    public void Apply(string eventName, string? sessionId, string? cwd = null, string? toolName = null)
     {
         var id = string.IsNullOrEmpty(sessionId) ? "default" : sessionId;
         var now = _now();
@@ -93,7 +92,7 @@ public sealed class ClaudeActivity
                 case "PreCompact":   _sessions[id] = new("work", now, project, prev?.Tool ?? "other", prev?.Done ?? 0); break;
                 case "PreToolUse":
                 case "PostToolUse":  _sessions[id] = new("work", now, project, tool, prev?.Done ?? 0); break;
-                case "Notification": _sessions[id] = new("wait", now, project, "", prev?.Done ?? 0, message ?? ""); break;
+                case "Notification": _sessions[id] = new("wait", now, project, "", prev?.Done ?? 0); break;
                 case "Stop":
                     _sessions[id] = new("done", now, project, "", (prev?.Done ?? 0) + 1);
                     _doneSeq++; _doneProject = project; _tasksToday++; _errorStreak = 0;
@@ -167,13 +166,13 @@ public sealed class ClaudeActivity
         {
             foreach (var k in _sessions.Where(kv => now - kv.Value.Since > ForgetAfter).Select(kv => kv.Key).ToList())
                 _sessions.Remove(k);
-            var best = "idle"; var project = ""; var tool = ""; var waitMsg = "";
+            var best = "idle"; var project = ""; var tool = "";
             foreach (var s in _sessions.Values)
             {
                 var e = Effective(s, now);
                 if (Priority(e) > Priority(best) || (Priority(e) == Priority(best) && project == ""))
                 {
-                    best = e; project = s.Project; tool = e == "work" ? s.Tool : ""; waitMsg = e == "wait" ? s.Msg : "";
+                    best = e; project = s.Project; tool = e == "work" ? s.Tool : "";
                 }
             }
             var list = BuildList(now);
@@ -183,7 +182,7 @@ public sealed class ClaudeActivity
                 best = quiet > SleepAfter ? "sleep" : quiet > BoredAfter ? "bored" : "idle";
             }
             if (now.Date != _day) { _day = now.Date; _tasksToday = 0; }
-            return new ClaudeSnapshot(best, tool, project, ComputeMood(now), _doneSeq, _doneProject, _tasksToday, _sessions.Count, waitMsg, list);
+            return new ClaudeSnapshot(best, tool, project, ComputeMood(now), _doneSeq, _doneProject, _tasksToday, _sessions.Count, list);
         }
     }
 }
