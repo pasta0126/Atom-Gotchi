@@ -1,0 +1,12 @@
+{
+  "hooks": {
+    "SessionStart":       [{ "hooks": [{ "type": "command", "command": "/RUTA/A/atom-gotchi/hooks/gotchi-hook.sh" }] }],
+    "UserPromptSubmit":   [{ "hooks": [{ "type": "command", "command": "/RUTA/A/atom-gotchi/hooks/gotchi-hook.sh" }] }],
+    "PreToolUse":         [{ "matcher": "*", "hooks": [{ "type": "command", "command": "/RUTA/A/atom-gotchi/hooks/gotchi-hook.sh" }] }],
+    "PostToolUse":        [{ "matcher": "*", "hooks": [{ "type": "command", "command": "/RUTA/A/atom-gotchi/hooks/gotchi-hook.sh" }] }],
+    "Notification":       [{ "hooks": [{ "type": "command", "command": "/RUTA/A/atom-gotchi/hooks/gotchi-hook.sh" }] }],
+    "Stop":               [{ "hooks": [{ "type": "command", "command": "/RUTA/A/atom-gotchi/hooks/gotchi-hook.sh" }] }],
+    "SubagentStop":       [{ "hooks": [{ "type": "command", "command": "/RUTA/A/atom-gotchi/hooks/gotchi-hook.sh" }] }],
+    "SessionEnd":         [{ "hooks": [{ "type": "command", "command": "/RUTA/A/atom-gotchi/hooks/gotchi-hook.sh" }] }]
+  }
+}

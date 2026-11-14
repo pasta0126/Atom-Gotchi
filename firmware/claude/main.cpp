@@ -1,8 +1,12 @@
-// Prototipo del motor de ojos expresivos para AtomS3R (128x128).
-// Controles: pulsar la pantalla (BtnA) = siguiente estado; por serie '0'-'7' fija estado,
-// 'a' = volver a ciclo automático. Imprime ms de render/push y FPS cada 2 s.
+// Gotchi de actividad de Claude Code para AtomS3R (128x128).
+// El servidor agrega los hooks de Claude en un estado (GET /api/claude) que una tarea
+// WiFi consulta cada ~1 s. Override manual: pulsar pantalla = siguiente estado,
+// serie '0'-'7' fija estado; el override caduca a los 10 s. 'a' cancela el override.
 #include <M5Unified.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
 #include <math.h>
+#include "../src/credentials.h"
 
 enum State : uint8_t { S_IDLE, S_ALERT, S_WORK, S_WAIT, S_DONE, S_ERROR, S_BORED, S_SLEEP, S_COUNT };
 static const char* STATE_NAME[S_COUNT] = {"idle", "alert", "work", "wait", "done", "error", "bored", "sleep"};
@@ -33,8 +37,10 @@ static const Pose POSES[S_COUNT] = {
 static M5Canvas canvas(&M5.Display);
 static Pose cur = POSES[S_IDLE];
 static State state = S_IDLE;
-static bool autoCycle = true;
 static uint32_t stateSince = 0;
+static uint32_t overrideUntil = 0;          // override manual (debug)
+static volatile int8_t remoteState = -1;    // lo escribe la tarea WiFi
+static volatile bool wifiUp = false;
 
 static float gazeX = 0, gazeY = 0;          // actual
 static float gazeTX = 0, gazeTY = 0;        // objetivo
@@ -181,6 +187,38 @@ static void drawEffects(float t, const Pose& p) {
     }
 }
 
+static int parseState(const String& b) {
+    for (int i = 0; i < S_COUNT; i++) if (b == STATE_NAME[i]) return i;
+    return -1;
+}
+
+// Tarea WiFi (core 0): no bloquea el render. Si el servidor no responde 5 veces seguidas,
+// el gotchi pasa a "bored" en vez de quedarse congelado en el último estado.
+static void netTask(void*) {
+    WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+    int fails = 0;
+    for (;;) {
+        wifiUp = WiFi.status() == WL_CONNECTED;
+        if (!wifiUp) { vTaskDelay(pdMS_TO_TICKS(1000)); continue; }
+        HTTPClient http;
+        http.setConnectTimeout(1000);
+        http.setTimeout(1500);
+        http.begin(String(API_URL) + "/api/claude");
+        int code = http.GET();
+        if (code == 200) {
+            String b = http.getString(); b.trim();
+            int s = parseState(b);
+            if (s >= 0) { remoteState = s; fails = 0; }
+        } else if (++fails >= 5) {
+            remoteState = S_BORED;
+        }
+        http.end();
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
 static uint32_t lastFrame = 0, accRender = 0, accPush = 0, frames = 0, lastReport = 0;
 
 void setup() {
@@ -192,6 +230,7 @@ void setup() {
     canvas.createSprite(128, 128);
     randomSeed(esp_random());
     setState(S_IDLE);
+    xTaskCreatePinnedToCore(netTask, "net", 8192, nullptr, 1, nullptr, 0);
     lastFrame = lastReport = millis();
 }
 
@@ -202,13 +241,16 @@ void loop() {
     lastFrame = now;
     float t = now / 1000.0f;
 
-    if (M5.BtnA.wasClicked()) { autoCycle = false; setState((State)((state + 1) % S_COUNT)); }
+    if (M5.BtnA.wasClicked()) { overrideUntil = now + 10000; setState((State)((state + 1) % S_COUNT)); }
     while (Serial.available()) {
         int c = Serial.read();
-        if (c >= '0' && c < '0' + S_COUNT) { autoCycle = false; setState((State)(c - '0')); }
-        else if (c == 'a') { autoCycle = true; Serial.println("auto cycle"); }
+        if (c >= '0' && c < '0' + S_COUNT) { overrideUntil = now + 10000; setState((State)(c - '0')); }
+        else if (c == 'a') { overrideUntil = 0; }
     }
-    if (autoCycle && now - stateSince > 4500) setState((State)((state + 1) % S_COUNT));
+    if (now >= overrideUntil) {
+        int rs = remoteState;
+        if (rs >= 0 && rs != state) setState((State)rs);
+    }
 
     // interpolar pose
     const Pose& tg = POSES[state];
@@ -238,8 +280,8 @@ void loop() {
 
     accRender += r1 - r0; accPush += r2 - r1; frames++;
     if (now - lastReport >= 2000) {
-        Serial.printf("fps=%.1f render=%.1fms push=%.1fms heap=%u\n", frames * 1000.0f / (now - lastReport),
-                      accRender / 1000.0f / frames, accPush / 1000.0f / frames, ESP.getFreeHeap());
+        Serial.printf("fps=%.1f render=%.1fms push=%.1fms heap=%u wifi=%d state=%s\n", frames * 1000.0f / (now - lastReport),
+                      accRender / 1000.0f / frames, accPush / 1000.0f / frames, ESP.getFreeHeap(), (int)wifiUp, STATE_NAME[state]);
         accRender = accPush = frames = 0; lastReport = now;
     }
     // sin límite artificial: medimos el techo; limitar a 60 fps
