@@ -3,5 +3,5 @@
 # URL configurable con GOTCHI_URL (por defecto el servidor local de desarrollo).
 payload=$(cat)
 printf '%s' "$payload" | curl -s -m 1 -X POST -H 'Content-Type: application/json' \
-  --data-binary @- "${GOTCHI_URL:-http://localhost:5055}/api/hook" >/dev/null 2>&1 &
+  --data-binary @- "${GOTCHI_URL:-https://atom-api.northernarchive.com}/api/hook" >/dev/null 2>&1 &
 exit 0

@@ -1,21 +1,22 @@
+name: atom-gotchi
+
 services:
-  gotchi:
+  atom-api:
     build: .
-    platform: linux/arm64
-    ports:
-      - "5000:8080"
+    image: atom-api:latest
+    container_name: atom-api
     restart: unless-stopped
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
     networks:
-      - shared-network
+      - proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.gotchi.rule=Host(`atom.northernarchive.com`)"
-      - "traefik.http.routers.gotchi.entrypoints=websecure"
-      - "traefik.http.routers.gotchi.tls.certresolver=myresolver"
-      - "traefik.http.services.gotchi.loadbalancer.server.port=8080"
+      - "traefik.http.routers.atom-api.rule=Host(`atom-api.northernarchive.com`)"
+      - "traefik.http.routers.atom-api.entrypoints=websecure"
+      - "traefik.http.routers.atom-api.tls.certresolver=le"
+      - "traefik.http.services.atom-api.loadbalancer.server.port=8080"
 
 networks:
-  shared-network:
+  proxy:
     external: true

@@ -5,6 +5,7 @@
 #include <M5Unified.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <math.h>
 #include "../src/credentials.h"
 
@@ -201,16 +202,23 @@ static void netTask(void*) {
     for (int i = 0; i < n; i++) Serial.printf("scan: '%s' ch%d rssi%d auth%d\n", WiFi.SSID(i).c_str(), WiFi.channel(i), WiFi.RSSI(i), WiFi.encryptionType(i));
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     int fails = 0, waited = 0;
+    // HTTPS (Traefik) con conexión reutilizada: evita un handshake TLS por petición.
+    // setInsecure(): no valida el certificado (suficiente para un indicador de actividad).
+    const bool https = String(API_URL).startsWith("https");
+    WiFiClientSecure secure; secure.setInsecure();
+    WiFiClient plain;
+    HTTPClient http;
+    http.setReuse(true);
     for (;;) {
         wifiUp = WiFi.status() == WL_CONNECTED;
         if (!wifiUp) {
             if (++waited % 3 == 0) Serial.printf("wifi status=%d (ssid len=%d)\n", (int)WiFi.status(), (int)strlen(WIFI_SSID));
             vTaskDelay(pdMS_TO_TICKS(1000)); continue;
         }
-        HTTPClient http;
-        http.setConnectTimeout(1000);
-        http.setTimeout(1500);
-        http.begin(String(API_URL) + "/api/claude");
+        http.setConnectTimeout(3000);
+        http.setTimeout(2500);
+        const String url = String(API_URL) + "/api/claude";
+        if (https) http.begin(secure, url); else http.begin(plain, url);
         int code = http.GET();
         if (code == 200) {
             String b = http.getString(); b.trim();
@@ -219,7 +227,7 @@ static void netTask(void*) {
         } else if (++fails >= 5) {
             remoteState = S_BORED;
         }
-        http.end();
+        if (code <= 0) http.end();   // conexión rota: forzar reconexión; si no, se reutiliza
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
