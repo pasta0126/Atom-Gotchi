@@ -225,6 +225,12 @@ struct Fx {
     bool  dizzy = false, sparkle = false;
     float yawn = 0;               // 0..1 apertura de la boca
     float blush = 0;              // 0..1 mejillas sonrojadas
+    bool  brow = false;           // dibujar cejas
+    float browY[2] = {0, 0};      // + baja / - sube (px)
+    float browAng[2] = {0, 0};    // + enfadado (extremo interno más bajo) / - triste
+    uint8_t glyph = 0;            // 0 pupila normal, 1 corazón, 2 estrella
+    uint8_t mouth = 0;            // 0 ninguna, 1 sonrisa, 2 puchero, 3 "o", 4 ondulada, 5 sonrisa torcida, 6 recta, 7 risa
+    float mouthAmt = 0;
 };
 static Fx fxRaw;
 static float fxSm[10];   // suavizado de: scale0,1 lid0,1 dy0,1 ox oy pupilMul botAdd
@@ -238,6 +244,7 @@ static uint32_t behStart = 0, nextBeh = 3000;
 static float behA = 0, behB = 0, behC = 0, behD = 0;   // parámetros aleatorios por ejecución
 static int behForce = -1;
 static int behCycle = 0;
+static int emoteIdx = 0;
 
 static float frand(float a, float b) { return a + (b - a) * (random(0, 10001) / 10000.0f); }
 
@@ -377,6 +384,101 @@ static void computeReaction(Fx& fx, uint32_t now, float t) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Mirada
 // ─────────────────────────────────────────────────────────────────────────────
+// Emotes de prueba (galería): cada uno combina pose, ojos, cejas, boca y partículas.
+// ─────────────────────────────────────────────────────────────────────────────
+enum Emote : uint8_t { E_NONE, E_HEART, E_STAR, E_LAUGH, E_CRY, E_SMUG, E_SHOCK, E_IDEA, E_SWEAT, E_YAWN, E_COLD, E_COUNT };
+static const char* EMOTE_NAME[E_COUNT] = {"", "corazones", "estrellas", "risa", "llanto", "enguido", "shock", "idea", "sudor", "bostezo", "frio"};
+static const uint16_t EMOTE_MS[E_COUNT] = {0, 2600, 2600, 2200, 3400, 2600, 2300, 3000, 2800, 3200, 2800};
+static Emote emote = E_NONE;
+static uint32_t emoteStart = 0, emoteEndedAt = 0;
+static bool gallery = false;
+static uint32_t galleryStart = 0;
+
+static void startEmote(Emote e) {
+    emote = e; emoteStart = millis();
+    Serial.printf("emote: %s\n", EMOTE_NAME[e]);
+}
+
+static void computeEmote(Fx& fx, uint32_t now, float t) {
+    if (emote == E_NONE) return;
+    float p = (now - emoteStart) / (float)EMOTE_MS[emote];
+    if (p >= 1) { emote = E_NONE; emoteEndedAt = now; return; }
+    float e = envelope(p), in = clamp01(p * 5);   // e: sube y baja; in: entrada rápida
+    switch (emote) {
+        case E_HEART:
+            fx.glyph = 1; fx.botAdd = 0.3f * e; fx.mouth = 1; fx.mouthAmt = 0.8f * e; fx.oy = -1.5f * sinf(t * 9) * e;
+            fx.gazeOv = true; fx.gx = 0; fx.gy = 0; fx.blush = 0.7f * e;
+            break;
+        case E_STAR:
+            fx.glyph = 2; fx.botAdd = 0.2f * e; fx.mouth = 7; fx.mouthAmt = 0.35f * e; fx.pupilMul = 1.2f;
+            fx.gazeOv = true; fx.gx = 0; fx.gy = 0;
+            break;
+        case E_LAUGH:
+            fx.botAdd = 0.66f * in; fx.ox = sinf(t * 36) * 2.2f * e; fx.oy = sinf(t * 18) * 1.5f * e;
+            fx.mouth = 7; fx.mouthAmt = (0.55f + 0.45f * fabsf(sinf(t * 13))) * e;
+            break;
+        case E_CRY:
+            fx.pupilMul = 1.3f; fx.ox = sinf(t * 23) * 0.9f * e; fx.mouth = 2; fx.mouthAmt = 0.9f * in;
+            fx.brow = true; fx.browAng[0] = fx.browAng[1] = -4.5f * in; fx.browY[0] = fx.browY[1] = -1;
+            fx.gazeOv = true; fx.gx = 0; fx.gy = 0.4f;
+            break;
+        case E_SMUG:
+            fx.lidAdd[0] = 0.45f * in; fx.lidAdd[1] = 0.08f * in; fx.brow = true;
+            fx.browY[1] = -5.5f * in; fx.browAng[1] = 1.5f * in; fx.browY[0] = 1.5f * in; fx.browAng[0] = 2.5f * in;
+            fx.mouth = 5; fx.mouthAmt = in; fx.pupilMul = 0.9f;
+            fx.gazeOv = true; fx.gx = 0.85f * sinf(p * 6.2832f); fx.gy = -0.1f;
+            break;
+        case E_SHOCK:
+            fx.scale[0] = fx.scale[1] = 1 + 0.28f * in; fx.pupilMul = 0.3f; fx.ox = sinf(t * 46) * 1.4f * e;
+            fx.brow = true; fx.browY[0] = fx.browY[1] = -8 * in; fx.mouth = 3; fx.mouthAmt = 0.55f * in;
+            fx.gazeOv = true; fx.gx = 0; fx.gy = 0;
+            break;
+        case E_IDEA:
+            if (p < 0.45f) {   // pensando
+                fx.gazeOv = true; fx.gx = -0.7f; fx.gy = -0.75f; fx.brow = true; fx.browY[1] = -5; fx.browAng[1] = 1; fx.browY[0] = 1;
+                fx.mouth = 6; fx.mouthAmt = 1; fx.lidAdd[0] = 0.12f;
+            } else {           // ¡eureka!
+                float q = clamp01((p - 0.45f) * 8);
+                fx.scale[0] = fx.scale[1] = 1 + 0.18f * q; fx.pupilMul = 1.1f; fx.botAdd = 0.2f * q; fx.brow = true;
+                fx.browY[0] = fx.browY[1] = -6 * q; fx.mouth = 1; fx.mouthAmt = 0.9f * q; fx.oy = -2 * q;
+                fx.gazeOv = true; fx.gx = 0; fx.gy = -0.15f;
+            }
+            break;
+        case E_SWEAT:
+            fx.gazeOv = true; fx.gx = 0.85f; fx.gy = 0.25f; fx.scale[0] = fx.scale[1] = 0.92f; fx.blush = 0.8f * e;
+            fx.mouth = 4; fx.mouthAmt = 0.55f * e; fx.brow = true; fx.browAng[0] = fx.browAng[1] = -3.5f; fx.browY[0] = fx.browY[1] = -2;
+            break;
+        case E_YAWN:
+            fx.scale[0] = fx.scale[1] = 1 - 0.72f * e; fx.oy = -3 * e; fx.mouth = 3; fx.mouthAmt = e;
+            fx.gazeOv = true; fx.gx = 0; fx.gy = -0.3f;
+            break;
+        case E_COLD:
+            fx.ox = sinf(t * 52) * 1.8f * in; fx.scale[0] = fx.scale[1] = 0.9f; fx.mouth = 4; fx.mouthAmt = 0.6f * in;
+            fx.brow = true; fx.browAng[0] = fx.browAng[1] = -3.5f; fx.pupilMul = 0.85f;
+            break;
+        default: break;
+    }
+}
+
+// Pose base de cada emote (color y forma); se interpola con el muelle
+static void emotePose(Pose& q) {
+    q = POSES[S_IDLE]; q.lidTop = 0; q.tilt = 0; q.lidBot = 0;
+    switch (emote) {
+        case E_HEART: q.r = 255; q.g = 205; q.b = 222; q.w = 38; q.h = 44; break;
+        case E_STAR:  q.r = 255; q.g = 238; q.b = 170; q.w = 38; q.h = 46; break;
+        case E_LAUGH: q.r = 255; q.g = 225; q.b = 140; q.w = 36; q.h = 40; break;
+        case E_CRY:   q.r = 150; q.g = 190; q.b = 255; q.w = 36; q.h = 44; q.lidTop = 0.1f; q.pupil = 0.8f; break;
+        case E_SMUG:  q.r = 205; q.g = 170; q.b = 255; q.w = 36; q.h = 40; break;
+        case E_SHOCK: q.r = 225; q.g = 240; q.b = 255; q.w = 40; q.h = 54; q.pupil = 0.3f; break;
+        case E_IDEA:  q.r = 255; q.g = 235; q.b = 150; q.w = 36; q.h = 44; break;
+        case E_SWEAT: q.r = 255; q.g = 185; q.b = 170; q.w = 36; q.h = 42; break;
+        case E_YAWN:  q.r = 170; q.g = 190; q.b = 230; q.w = 36; q.h = 40; break;
+        case E_COLD:  q.r = 170; q.g = 225; q.b = 255; q.w = 36; q.h = 42; break;
+        default: break;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 static void updateGaze(uint32_t now, float t, const Fx& fx) {
     if (fx.gazeOv) { gazeTX = fx.gx; gazeTY = fx.gy; return; }
     switch (state) {
@@ -424,6 +526,7 @@ static float blinkFactor(uint32_t now) {
 // Pose objetivo = pose del estado + ajustes por herramienta y por humor
 static Pose targetPose() {
     Pose p = POSES[state];
+    if (emote != E_NONE) { emotePose(p); return p; }
     if (react == R_ANNOYED) {   // cara de enfado (también si estaba dormido)
         p.h = 38; p.w = 36; p.lidTop = 0.22f; p.tilt = 0.8f; p.lidBot = 0; p.pupil = 0.5f; p.yoff = 2;
         p.r = 255; p.g = 105; p.b = 105;
@@ -467,7 +570,7 @@ static void drawHeart(int x, int y, int s, uint16_t c) {
 }
 
 static void drawEye(int idx, float cx, float cy, float w, float h, const Pose& p, float lidTopExtra, float botExtra,
-                    float pupilMul, bool dizzy, bool sparkle, float t, uint16_t bg) {
+                    float pupilMul, bool dizzy, bool sparkle, int glyph, float t, uint16_t bg) {
     const int cxi = (int)cx, cyi = (int)cy;
     const int x0 = cxi - (int)(w / 2), top = cyi - (int)(h / 2);
     canvas.setClipRect(x0 - 6, 0, (int)w + 12, 128);
@@ -484,8 +587,14 @@ static void drawEye(int idx, float cx, float cy, float w, float h, const Pose& p
         float pr = pup * fminf(w, h) * 0.42f;
         float px = cx + gazeX * (w * 0.5f - pr) * 0.8f;
         float py = cy + gazeY * (h * 0.5f - pr) * 0.8f;
-        canvas.fillCircle((int)px, (int)py, (int)pr, rgb(14, 16, 30));
-        if (dizzy) {   // espiral
+        if (!glyph) canvas.fillCircle((int)px, (int)py, (int)pr, rgb(14, 16, 30));
+        if (glyph == 1) {   // ojos de corazón que laten
+            float beat = 1.0f + 0.18f * sinf(t * 12);
+            drawHeart((int)px, (int)py - 1, (int)fmaxf(3, pr * 0.95f * beat), rgb(235, 40, 95));
+        } else if (glyph == 2) {   // ojos de estrella
+            int ss = (int)fmaxf(4, pr * 1.2f + 1.5f * sinf(t * 10));
+            drawStar((int)px, (int)py, ss, rgb(255, 170, 40)); drawStar((int)px, (int)py, ss - 2, TFT_WHITE);
+        } else if (dizzy) {   // espiral
             float a0 = t * 9 * (idx ? -1 : 1);
             int lx = (int)px, ly = (int)py;
             for (float a = 0; a < 12.0f; a += 0.35f) {
@@ -604,6 +713,113 @@ static void drawEffects(float t, bool bottomFree) {
     }
 }
 
+static float eyeCx[2], eyeTop[2], eyeW[2];   // geometría del último frame (para cejas)
+
+static void drawBrows() {
+    if (!fxRaw.brow) return;
+    uint16_t c = rgb(cur.r * 0.9f, cur.g * 0.9f, cur.b * 0.9f);
+    for (int i = 0; i < 2; i++) {
+        float inner = i == 0 ? 1.0f : -1.0f;
+        float y = eyeTop[i] - 7 + fxRaw.browY[i], a = fxRaw.browAng[i];
+        canvas.drawWideLine(eyeCx[i] - inner * (eyeW[i] / 2 + 1), y - a, eyeCx[i] + inner * (eyeW[i] / 2 - 2), y + a, 2.0f, c);
+    }
+}
+
+static void drawMouth(float t) {
+    if (!fxRaw.mouth) return;
+    uint16_t c = rgb(240, 175, 195), dark = rgb(60, 25, 45);
+    float a = fxRaw.mouthAmt;
+    switch (fxRaw.mouth) {
+        case 1: { float r = 8 + 4 * a; canvas.fillArc(64, 92, r - 2, r, 20, 160, c); break; }          // sonrisa
+        case 2: { float r = 8 + 3 * a; canvas.fillArc(64, 112, r - 2, r, 200, 340, c); break; }        // puchero
+        case 3: { int ry = (int)(3 + 9 * a), rx = (int)(3 + 3 * a);                                    // "o"
+                  canvas.fillEllipse(64, 100, rx, ry, dark); canvas.drawEllipse(64, 100, rx, ry, c); break; }
+        case 7: { int ry = (int)(3 + 7 * a), rx = (int)(6 + 9 * a);                                    // risa
+                  canvas.fillEllipse(64, 99, rx, ry, dark); canvas.drawEllipse(64, 99, rx, ry, c);
+                  canvas.fillEllipse(64, 99 + ry / 2, rx / 2, ry / 2, rgb(230, 100, 120)); break; }
+        case 4: {                                                                                      // ondulada
+            float px = 50, py = 102;
+            for (int k = 1; k <= 6; k++) {
+                float x = 50 + k * 4.7f, y = 102 + sinf(k * 1.4f + t * 14) * 2.2f * a;
+                canvas.drawWideLine(px, py, x, y, 1.2f, c); px = x; py = y;
+            }
+            break; }
+        case 5: canvas.drawWideLine(54, 100, 66, 102, 1.4f, c); canvas.drawWideLine(66, 102, 77, 96, 1.4f, c); break;   // sonrisa torcida
+        case 6: canvas.drawWideLine(56, 101, 72, 101, 1.4f, c); break;                                // recta
+        default: break;
+    }
+}
+
+// Partículas y accesorios propios de cada emote
+static void drawEmoteOverlays(float t, uint32_t now) {
+    if (emote == E_NONE) return;
+    float p = (now - emoteStart) / (float)EMOTE_MS[emote];
+    switch (emote) {
+        case E_HEART:
+            for (int i = 0; i < 4; i++) {
+                float ph = fmodf(t * 0.9f + i * 0.25f, 1.0f);
+                drawHeart(24 + i * 26 + (int)(sinf(ph * 7 + i) * 4), 92 - (int)(ph * 70), 2 + (i & 1) * 2, rgb(255, 110 + 90 * ph, 150));
+            }
+            break;
+        case E_STAR:
+            for (int i = 0; i < 5; i++) {
+                float ph = fmodf(t * 1.6f + i * 0.2f, 1.0f); int s = (int)(5 * sinf(ph * 3.14159f));
+                static const int8_t sx[5] = {16, 110, 26, 100, 64}, sy[5] = {24, 30, 98, 94, 12};
+                if (s >= 1) drawStar(sx[i], sy[i], s, rgb(255, 245, 190));
+            }
+            break;
+        case E_LAUGH:
+            for (int i = 0; i < 2; i++) {   // lágrimas de risa que salen despedidas
+                float ph = fmodf(t * 2.2f + i * 0.5f, 1.0f); float dir = i ? 1 : -1;
+                canvas.fillCircle(64 + (int)(dir * (34 + ph * 20)), 70 + (int)(ph * ph * 26), 3 - (int)(ph * 2), rgb(150, 200, 255));
+            }
+            break;
+        case E_CRY:
+            for (int i = 0; i < 2; i++)     // regueros de lágrimas
+                for (int k = 0; k < 3; k++) {
+                    float ph = fmodf(t * 1.3f + k * 0.33f + i * 0.15f, 1.0f);
+                    canvas.fillCircle((int)(eyeCx[i] + (i ? 6 : -6)), (int)(eyeTop[i] + 40 + ph * 34), 2 + (int)((1 - ph) * 2), rgb(130, 185, 255));
+                }
+            break;
+        case E_SMUG:
+            drawStar(88, 48, 3 + ((int)(t * 6) & 1), rgb(255, 255, 255));   // brillo en el ojo
+            break;
+        case E_SHOCK:
+            for (int i = 0; i < 3; i++) {   // líneas de impacto sobre la cabeza
+                float ang = (i - 1) * 0.5f - 1.5708f;
+                canvas.drawWideLine(64 + cosf(ang) * 16, 20 + sinf(ang) * 12, 64 + cosf(ang) * 26, 20 + sinf(ang) * 20, 1.2f, rgb(235, 245, 255));
+            }
+            break;
+        case E_IDEA:
+            if (p >= 0.45f) {   // bombilla con rayos y un destello al encenderse
+                float q = (p - 0.45f) / 0.55f;
+                canvas.fillCircle(64, 13, 8, rgb(255, 235, 110)); canvas.fillRect(60, 21, 9, 4, rgb(170, 170, 180));
+                float rl = 4 + 2 * sinf(t * 14);
+                for (int k = 0; k < 8; k++) { float a = k * 0.785f; canvas.drawLine(64 + cosf(a) * 12, 13 + sinf(a) * 12, 64 + cosf(a) * (12 + rl), 13 + sinf(a) * (12 + rl), rgb(255, 240, 150)); }
+                if (q < 0.12f) canvas.fillRectAlpha(0, 0, 128, 128, (uint8_t)(120 * (1 - q / 0.12f)), TFT_WHITE);
+            } else {
+                canvas.setFont(&fonts::Font4); canvas.setTextColor(rgb(255, 235, 150));
+                canvas.drawString(((int)(t * 3) % 3 == 0) ? "." : ((int)(t * 3) % 3 == 1) ? ".." : "...", 84, 20);
+            }
+            break;
+        case E_SWEAT: {
+            float ph = fmodf(t * 0.7f, 1.0f);
+            int y = 28 + (int)(ph * 22);
+            canvas.fillCircle(102, y + 4, 3, rgb(150, 205, 255)); canvas.fillTriangle(99, y + 3, 105, y + 3, 102, y - 4, rgb(150, 205, 255));
+            break; }
+        case E_YAWN:
+            if (p > 0.7f) { float ph = (p - 0.7f) / 0.3f; canvas.fillCircle(32, 78 + (int)(ph * 14), 2, rgb(150, 200, 255)); }
+            break;
+        case E_COLD:
+            for (int i = 0; i < 6; i++) {
+                float ph = fmodf(t * 0.6f + i * 0.17f, 1.0f);
+                drawStar(14 + i * 20 + (int)(sinf(ph * 6 + i) * 4), 6 + (int)(ph * 110), 2, rgb(215, 240, 255));
+            }
+            break;
+        default: break;
+    }
+}
+
 static void drawOverlays(float t, uint32_t now) {
     if (react == R_PET) {   // corazones que suben
         float p = (now - reactStart) / (float)REACT_MS[R_PET];
@@ -708,6 +924,7 @@ static void drawClickFlash(uint32_t now) {
 static void handleButton(uint32_t now) {
     if (!M5.BtnA.wasPressed()) return;
     lastBtnAt = now; clickAt = now; nPress++;
+    if (gallery) { emoteIdx = emoteIdx % (E_COUNT - 1) + 1; startEmote((Emote)emoteIdx); return; }
     if (state != S_SLEEP) { blinking = true; blinkStart = now; }
     if (state == S_SLEEP) wakeUntil = now + 180000;                    // despertar (3 min)
     if (pending) { localAckSeq = R.attnSeq; ackRequested = true; }
@@ -786,6 +1003,8 @@ void loop() {
         if (c >= '0' && c < '0' + S_COUNT) { overrideUntil = now + 10000; setState((State)(c - '0')); }
         else if (c == 'a') { overrideUntil = 0; toolOverride = -1; }
         else if (c == 'T') { toolOverride = (toolOverride + 1) % T_COUNT; overrideUntil = now + 10000; setState(S_WORK); Serial.printf("tool=%s\n", TOOL_NAME[toolOverride]); }
+        else if (c == 'e') { emoteIdx = emoteIdx % (E_COUNT - 1) + 1; startEmote((Emote)emoteIdx); }
+        else if (c == 'g') { gallery = !gallery; galleryStart = now; overrideUntil = gallery ? 0xFFFFFFFFu : 0; if (gallery) { setState(S_IDLE); emote = E_NONE; emoteEndedAt = 0; } else emote = E_NONE; Serial.printf("gallery: %d\n", (int)gallery); }
         else if (c == 'k') startReaction(R_DIZZY);
         else if (c == 'h') startReaction(R_PET);
         else if (c == 's') startReaction(R_STARTLE);
@@ -832,12 +1051,19 @@ void loop() {
     fxRaw = Fx();
     computeBehavior(fxRaw, now, t);
     computeReaction(fxRaw, now, t);
+    if (gallery && now - galleryStart > 900000) { gallery = false; overrideUntil = 0; emote = E_NONE; }   // la galería caduca a los 15 min
+    computeEmote(fxRaw, now, t);   // los emotes mandan sobre behaviors y reacciones
+    if (gallery && emote == E_NONE && now - emoteEndedAt > 600) startEmote((Emote)(emoteIdx = emoteIdx % (E_COUNT - 1) + 1));
     // (los reflejos del IMU ganan sobre los behaviors: se calculan después y sobrescriben campos)
 
     // interpolar pose
     Pose tg = targetPose();
     float* cp = (float*)&cur; const float* tp = (const float*)&tg;
-    for (size_t i = 0; i < sizeof(Pose) / sizeof(float); i++) cp[i] = approach(cp[i], tp[i], 9.0f, dt);
+    // forma (8 primeros campos): muelle con ligero rebote; color: suavizado simple
+    static float pv[8] = {0};
+    float sdt = fminf(dt, 0.033f);
+    for (int i = 0; i < 8; i++) { pv[i] += (260.0f * (tp[i] - cp[i]) - 19.0f * pv[i]) * sdt; cp[i] += pv[i] * sdt; }
+    for (size_t i = 8; i < sizeof(Pose) / sizeof(float); i++) cp[i] = approach(cp[i], tp[i], 9.0f, dt);
 
     // suavizar efectos
     const float fxT[10] = {fxRaw.scale[0], fxRaw.scale[1], fxRaw.lidAdd[0], fxRaw.lidAdd[1], fxRaw.dy[0], fxRaw.dy[1],
@@ -871,15 +1097,23 @@ void loop() {
         float s = fxSm[i];
         float h = fmaxf(4.0f, cur.h * breathe * s * (1.0f - b));
         float w = cur.w * (s > 1 ? 1 + (s - 1) * 0.6f : 1.0f);
+        { float full = cur.h * breathe * s; if (full > 8) w *= 1 + 0.2f * clamp01(1 - h / full); }   // aplastar y estirar al parpadear
         float cx = 64 + (i ? dx : -dx) + fxSm[6];
-        drawEye(i, cx, cy + fxSm[4 + i], w, h, cur, fxSm[2 + i], fxSm[9], fxSm[8], fxRaw.dizzy, fxRaw.sparkle, t, bg);
+        drawEye(i, cx, cy + fxSm[4 + i], w, h, cur, fxSm[2 + i], fxSm[9], fxSm[8], fxRaw.dizzy, fxRaw.sparkle, fxRaw.glyph, t, bg);
+        eyeCx[i] = cx; eyeTop[i] = cy + fxSm[4 + i] - h / 2; eyeW[i] = w;
     }
+    drawBrows();
+    drawMouth(t);
     drawEffects(t, !pending);
     drawOverlays(t, now);
+    drawEmoteOverlays(t, now);
     drawWaitMsg(t);
     }
     drawBorder(now);
     drawClickFlash(now);
+    if (gallery && emote != E_NONE) {   // etiqueta del emote que se está viendo
+        canvas.setFont(&fonts::Font2); canvas.setTextColor(rgb(180, 200, 230)); canvas.drawString(EMOTE_NAME[emote], 4, 2);
+    }
     if (otaPct >= 0) {   // progreso de actualización por WiFi
         canvas.fillRect(14, 58, 100, 12, rgb(20, 20, 30)); canvas.fillRect(16, 60, otaPct, 8, rgb(120, 220, 255));
         canvas.setFont(&fonts::Font2); canvas.setTextColor(TFT_WHITE); canvas.drawCenterString("OTA", 64, 40);
