@@ -34,6 +34,27 @@ static const char* STATE_NAME[S_COUNT] = {"idle", "alert", "work", "wait", "done
 enum Tool : uint8_t { T_NONE, T_READ, T_SEARCH, T_EDIT, T_BASH, T_WEB, T_AGENT, T_OTHER, T_COUNT };
 static const char* TOOL_NAME[T_COUNT] = {"", "read", "search", "edit", "bash", "web", "agent", "other"};
 
+// Emotes (definidos aquí para poder usarlos desde los behaviors; la lógica va más abajo)
+enum Emote : uint8_t { E_NONE, E_HEART, E_STAR, E_LAUGH, E_CRY, E_SMUG, E_SHOCK, E_IDEA, E_SWEAT, E_YAWN, E_COLD,
+                       E_PUPPY, E_CONFUSED, E_SICK, E_CROSS, E_TONGUE, E_KISS, E_COUNT };
+static const char* EMOTE_NAME[E_COUNT] = {"", "corazones", "estrellas", "risa", "llanto", "engreido", "shock", "idea", "sudor", "bostezo", "frio",
+                                          "cachorro", "confuso", "enfermo", "bizco", "lengua", "beso"};
+static const uint16_t EMOTE_MS[E_COUNT] = {0, 2600, 2600, 2200, 3400, 2600, 2300, 3000, 2800, 3200, 2800,
+                                           2800, 2800, 3200, 2200, 2200, 2400};
+static Emote emote = E_NONE;
+static uint32_t emoteStart = 0, emoteEndedAt = 0, lastPuppyAt = 0;
+static bool gallery = false;
+static uint32_t galleryStart = 0;
+static void startEmote(Emote e);
+static Emote pickIdleEmote();
+
+// Reacciones físicas (IMU / botón): se superponen al estado
+enum React : uint8_t { R_NONE, R_DIZZY, R_PET, R_STARTLE, R_GREET, R_ANNOYED };
+static const uint16_t REACT_MS[6] = {0, 3000, 2200, 1200, 2800, 2600};
+static React react = R_NONE;
+static uint32_t reactStart = 0;
+
+
 // Pose continua: todo se interpola hacia el objetivo.
 struct Pose {
     float w, h, gap;     // tamaño de ojo y separación
@@ -231,6 +252,7 @@ struct Fx {
     uint8_t glyph = 0;            // 0 pupila normal, 1 corazón, 2 estrella
     uint8_t mouth = 0;            // 0 ninguna, 1 sonrisa, 2 puchero, 3 "o", 4 ondulada, 5 sonrisa torcida, 6 recta, 7 risa
     float mouthAmt = 0;
+    float cross = 0;              // 0..1 bizquear (pupilas hacia el centro)
 };
 static Fx fxRaw;
 static float fxSm[10];   // suavizado de: scale0,1 lid0,1 dy0,1 ox oy pupilMul botAdd
@@ -272,7 +294,13 @@ static void computeBehavior(Fx& fx, uint32_t now, float t) {
     if (state != S_IDLE && state != S_BORED) { beh = B_NONE; nextBeh = now + 2500; return; }
     if (beh == B_NONE) {
         if (behForce >= 0) { startBehavior((Beh)behForce); behForce = -1; }
-        else if (now >= nextBeh) startBehavior(pickBehavior());
+        else if (now >= nextBeh) {
+            if (!gallery && react == R_NONE && emote == E_NONE && random(0, 100) < 38) {   // a veces se le ocurre un emote en vez de un gesto
+                Emote e = pickIdleEmote(); startEmote(e);
+                nextBeh = now + EMOTE_MS[e] + random(2500, 6000); return;
+            }
+            startBehavior(pickBehavior());
+        }
         else return;
     }
     float p = (now - behStart) / (float)BEH_MS[beh];
@@ -341,10 +369,6 @@ static void computeBehavior(Fx& fx, uint32_t now, float t) {
 }
 
 // Reacciones físicas (IMU / botón): se superponen al estado
-enum React : uint8_t { R_NONE, R_DIZZY, R_PET, R_STARTLE, R_GREET, R_ANNOYED };
-static const uint16_t REACT_MS[6] = {0, 3000, 2200, 1200, 2800, 2600};
-static React react = R_NONE;
-static uint32_t reactStart = 0;
 
 static void startReaction(React r) {
     react = r; reactStart = millis();
@@ -386,17 +410,30 @@ static void computeReaction(Fx& fx, uint32_t now, float t) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Emotes de prueba (galería): cada uno combina pose, ojos, cejas, boca y partículas.
 // ─────────────────────────────────────────────────────────────────────────────
-enum Emote : uint8_t { E_NONE, E_HEART, E_STAR, E_LAUGH, E_CRY, E_SMUG, E_SHOCK, E_IDEA, E_SWEAT, E_YAWN, E_COLD, E_COUNT };
-static const char* EMOTE_NAME[E_COUNT] = {"", "corazones", "estrellas", "risa", "llanto", "enguido", "shock", "idea", "sudor", "bostezo", "frio"};
-static const uint16_t EMOTE_MS[E_COUNT] = {0, 2600, 2600, 2200, 3400, 2600, 2300, 3000, 2800, 3200, 2800};
-static Emote emote = E_NONE;
-static uint32_t emoteStart = 0, emoteEndedAt = 0;
-static bool gallery = false;
-static uint32_t galleryStart = 0;
-
 static void startEmote(Emote e) {
-    emote = e; emoteStart = millis();
+    emote = e; emoteStart = millis(); react = R_NONE;   // un emote cancela cualquier reacción en curso
+    if (e == E_PUPPY) lastPuppyAt = emoteStart;
     Serial.printf("emote: %s\n", EMOTE_NAME[e]);
+}
+
+// Qué emote se le ocurre al azar cuando está ocioso (según humor y estado)
+static Emote pickIdleEmote() {
+    struct W { Emote e; int w; };
+    W pool[16]; int n = 0, total = 0;
+    auto add = [&](Emote e, int w) { if (w > 0) { pool[n++] = {e, w}; total += w; } };
+    add(E_IDEA, 2); add(E_CONFUSED, 2); add(E_SMUG, 1); add(E_CROSS, 1); add(E_TONGUE, 1); add(E_KISS, 1); add(E_SWEAT, mood <= -1 ? 3 : 1);
+    if (mood >= 1) { add(E_STAR, 3); add(E_HEART, 2); add(E_LAUGH, 3); }
+    if (mood <= -1) { add(E_CRY, 2); add(E_SICK, 1); }
+    if (state == S_BORED) { add(E_YAWN, 5); add(E_COLD, 1); }
+    int r = random(0, total);
+    for (int i = 0; i < n; i++) if ((r -= pool[i].w) < 0) return pool[i].e;
+    return E_IDEA;
+}
+
+// Reacción a un click cuando no hay nada que confirmar
+static Emote pickBoopEmote() {
+    int r = random(0, 8);
+    return r < 3 ? E_HEART : r < 5 ? E_LAUGH : r < 6 ? E_STAR : r < 7 ? E_KISS : E_TONGUE;
 }
 
 static void computeEmote(Fx& fx, uint32_t now, float t) {
@@ -456,6 +493,35 @@ static void computeEmote(Fx& fx, uint32_t now, float t) {
             fx.ox = sinf(t * 52) * 1.8f * in; fx.scale[0] = fx.scale[1] = 0.9f; fx.mouth = 4; fx.mouthAmt = 0.6f * in;
             fx.brow = true; fx.browAng[0] = fx.browAng[1] = -3.5f; fx.pupilMul = 0.85f;
             break;
+        case E_PUPPY:   // ojos de cachorro: pupilas enormes, cejas tristes, temblor leve
+            fx.pupilMul = 1.2f; fx.brow = true; fx.browAng[0] = fx.browAng[1] = -5 * in; fx.browY[0] = fx.browY[1] = -3 * in;
+            fx.ox = sinf(t * 9) * 0.7f * e; fx.mouth = 2; fx.mouthAmt = 0.3f * in; fx.gazeOv = true; fx.gx = 0; fx.gy = -0.1f;
+            break;
+        case E_CONFUSED:   // confuso: ojos desparejados, cejas asimétricas, balanceo
+            fx.scale[0] = 1 + 0.2f * in; fx.scale[1] = 1 - 0.15f * in; fx.dy[0] = -2 * in; fx.dy[1] = 2 * in;
+            fx.brow = true; fx.browY[0] = -4 * in; fx.browAng[0] = -3 * in; fx.browY[1] = 1 * in; fx.browAng[1] = 2 * in;
+            fx.ox = sinf(t * 3.2f) * 2.0f * e; fx.mouth = 4; fx.mouthAmt = 0.4f * in;
+            fx.gazeOv = true; fx.gx = sinf(t * 2.1f) * 0.7f; fx.gy = sinf(t * 1.3f) * 0.4f;
+            break;
+        case E_SICK:   // enfermo: ojos caídos, balanceo lento, termómetro
+            fx.scale[0] = fx.scale[1] = 0.85f; fx.lidAdd[0] = fx.lidAdd[1] = 0.25f * in; fx.oy = 3 * in + sinf(t * 2) * 1.5f;
+            fx.ox = sinf(t * 1.7f) * 3.0f * in; fx.brow = true; fx.browAng[0] = fx.browAng[1] = -3.5f; fx.browY[0] = fx.browY[1] = -1;
+            fx.gazeOv = true; fx.gx = sinf(t * 1.1f) * 0.4f; fx.gy = 0.5f;
+            break;
+        case E_CROSS:   // bizquear
+            fx.cross = in * (0.55f + 0.1f * sinf(t * 7)); fx.brow = true; fx.browY[0] = fx.browY[1] = -4 * in;
+            fx.mouth = 6; fx.mouthAmt = 1; fx.gazeOv = true; fx.gx = 0; fx.gy = 0;
+            break;
+        case E_TONGUE: {   // sacar la lengua con un guiño
+            int side = 1;
+            fx.scale[side] = 1 - 0.93f * in; fx.botAdd = 0.35f * in; fx.mouth = 8; fx.mouthAmt = in; fx.oy = sinf(t * 10) * 1.0f * e;
+            fx.gazeOv = true; fx.gx = 0; fx.gy = 0;
+            break; }
+        case E_KISS: {   // guiño con beso
+            int side = 0;
+            fx.scale[side] = 1 - 0.93f * in; fx.botAdd = 0.2f * in; fx.mouth = 9; fx.mouthAmt = in; fx.blush = 0.8f * e;
+            fx.gazeOv = true; fx.gx = 0; fx.gy = 0;
+            break; }
         default: break;
     }
 }
@@ -474,6 +540,12 @@ static void emotePose(Pose& q) {
         case E_SWEAT: q.r = 255; q.g = 185; q.b = 170; q.w = 36; q.h = 42; break;
         case E_YAWN:  q.r = 170; q.g = 190; q.b = 230; q.w = 36; q.h = 40; break;
         case E_COLD:  q.r = 170; q.g = 225; q.b = 255; q.w = 36; q.h = 42; break;
+        case E_PUPPY: q.r = 255; q.g = 232; q.b = 190; q.w = 40; q.h = 52; q.pupil = 0.85f; break;
+        case E_CONFUSED: q.r = 210; q.g = 215; q.b = 255; q.w = 36; q.h = 42; break;
+        case E_SICK:  q.r = 175; q.g = 220; q.b = 150; q.w = 36; q.h = 42; q.tilt = -0.3f; break;
+        case E_CROSS: q.r = 255; q.g = 235; q.b = 160; q.w = 38; q.h = 44; q.pupil = 0.6f; break;
+        case E_TONGUE: q.r = 255; q.g = 200; q.b = 170; q.w = 36; q.h = 42; break;
+        case E_KISS:  q.r = 255; q.g = 200; q.b = 215; q.w = 36; q.h = 42; break;
         default: break;
     }
 }
@@ -587,6 +659,7 @@ static void drawEye(int idx, float cx, float cy, float w, float h, const Pose& p
         float pr = pup * fminf(w, h) * 0.42f;
         float px = cx + gazeX * (w * 0.5f - pr) * 0.8f;
         float py = cy + gazeY * (h * 0.5f - pr) * 0.8f;
+        px += fxRaw.cross * (idx == 0 ? 1.0f : -1.0f) * (w * 0.32f);
         if (!glyph) canvas.fillCircle((int)px, (int)py, (int)pr, rgb(14, 16, 30));
         if (glyph == 1) {   // ojos de corazón que laten
             float beat = 1.0f + 0.18f * sinf(t * 12);
@@ -746,6 +819,9 @@ static void drawMouth(float t) {
             break; }
         case 5: canvas.drawWideLine(54, 100, 66, 102, 1.4f, c); canvas.drawWideLine(66, 102, 77, 96, 1.4f, c); break;   // sonrisa torcida
         case 6: canvas.drawWideLine(56, 101, 72, 101, 1.4f, c); break;                                // recta
+        case 8: { float r = 9; canvas.fillArc(64, 93, r - 2, r, 20, 160, c);                          // lengua fuera
+                  canvas.fillEllipse(64, 104 + (int)(sinf(t * 10) * 1.5f), 5, 7, rgb(235, 90, 110)); break; }
+        case 9: canvas.fillEllipse(64, 100, 3, 3, dark); canvas.drawEllipse(64, 100, 3, 3, c); break;  // morrito de beso
         default: break;
     }
 }
@@ -814,6 +890,27 @@ static void drawEmoteOverlays(float t, uint32_t now) {
             for (int i = 0; i < 6; i++) {
                 float ph = fmodf(t * 0.6f + i * 0.17f, 1.0f);
                 drawStar(14 + i * 20 + (int)(sinf(ph * 6 + i) * 4), 6 + (int)(ph * 110), 2, rgb(215, 240, 255));
+            }
+            break;
+        case E_PUPPY:   // destellos de lágrima en los ojos
+            for (int i = 0; i < 2; i++) drawStar((int)(eyeCx[i] - 7), (int)(eyeTop[i] + 12 + 2 * sinf(t * 6 + i)), 2 + ((int)(t * 5 + i) & 1), TFT_WHITE);
+            break;
+        case E_CONFUSED: {
+            canvas.setFont(&fonts::Font4); canvas.setTextColor(rgb(230, 235, 255));
+            canvas.drawString("?", 100, 14 + (int)(3 * sinf(t * 6))); canvas.drawString("?", 20, 20 - (int)(3 * sinf(t * 6 + 1)));
+            break; }
+        case E_SICK: {   // termómetro en la boca y gotas de sudor
+            canvas.drawWideLine(70, 103, 98, 92, 2.0f, rgb(235, 240, 250)); canvas.fillCircle(99, 91, 4, rgb(235, 70, 70));
+            float ph = fmodf(t * 0.8f, 1.0f);
+            canvas.fillCircle(30, 40 + (int)(ph * 24), 2, rgb(150, 205, 255));
+            break; }
+        case E_TONGUE:
+            drawStar(36, 50, 3 + ((int)(t * 8) & 1), rgb(255, 255, 255));
+            break;
+        case E_KISS:   // corazones que salen despedidos de la boca
+            for (int i = 0; i < 3; i++) {
+                float ph = fmodf(t * 1.1f + i * 0.33f, 1.0f);
+                drawHeart(68 + (int)(ph * 42), 96 - (int)(ph * 74), 2 + (i & 1) * 2, rgb(255, 100 + 100 * ph, 150));
             }
             break;
         default: break;
@@ -928,7 +1025,9 @@ static void handleButton(uint32_t now) {
     if (state != S_SLEEP) { blinking = true; blinkStart = now; }
     if (state == S_SLEEP) wakeUntil = now + 180000;                    // despertar (3 min)
     if (pending) { localAckSeq = R.attnSeq; ackRequested = true; }
-    startReaction(R_PET);
+    if (state == S_SLEEP) startEmote(E_YAWN);                  // despertar con un bostezo
+    else if (pending) startEmote(E_HEART);                      // gracias por confirmar
+    else startEmote(pickBoopEmote());                           // caricia: reacción variada
     Serial.printf("button: press #%u (attn=%d seq=%ld)\n", (unsigned)nPress, (int)pending, R.attnSeq);
 }
 
@@ -950,7 +1049,7 @@ static void imuUpdate(uint32_t now) {
 
     // caída libre
     freefallFrames = mag < 0.35f ? freefallFrames + 1 : 0;
-    if (freefallFrames == 4 && react != R_STARTLE) { startReaction(R_STARTLE); return; }
+    if (freefallFrames == 4 && emote != E_SHOCK) { startEmote(E_SHOCK); return; }
 
     // picos
     if (dm > 0.6f && now - lastSpike > 90) {
@@ -1027,7 +1126,10 @@ void loop() {
     mood = r.mood;
     if (r.attnSeq < localAckSeq) localAckSeq = 0;               // el servidor se reinició: reiniciar la cuenta
     bool attnNow = r.attn && r.attnSeq > localAckSeq;           // parpadeo suave hasta que alguien pulse
-    if (attnNow && !pending) pendingSince = now;
+    if (attnNow && !pending) {
+        pendingSince = now;
+        if (!gallery && react == R_NONE) startEmote(mood >= 2 ? E_HEART : E_STAR);   // ¡terminó!
+    }
     pending = attnNow;
     if (now >= overrideUntil) {
         toolOverride = -1;
@@ -1036,6 +1138,11 @@ void loop() {
         if (night && (rs == S_IDLE || rs == S_BORED)) rs = S_SLEEP;   // de noche duerme en vez de aburrirse
         if (rs == S_SLEEP && now < wakeUntil) rs = S_IDLE;            // lo has despertado con un click
         if (rs >= 0 && rs != state) {
+            if (!gallery && react == R_NONE) {   // emotes ligados a cambios de estado
+                if (rs == S_WAIT) startEmote(E_PUPPY);
+                else if (rs == S_ERROR) startEmote(E_CRY);
+                else if (rs == S_SLEEP && state != S_SLEEP) startEmote(E_YAWN);
+            }
             // saludo: primera actividad de la mañana
             if (hourNow >= 5 && hourNow < 13 && todayYday != lastGreetDay && (rs == S_ALERT || rs == S_WORK) &&
                 (state == S_SLEEP || state == S_BORED || state == S_IDLE)) {
@@ -1052,6 +1159,7 @@ void loop() {
     computeBehavior(fxRaw, now, t);
     computeReaction(fxRaw, now, t);
     if (gallery && now - galleryStart > 900000) { gallery = false; overrideUntil = 0; emote = E_NONE; }   // la galería caduca a los 15 min
+    if (!gallery && state == S_WAIT && emote == E_NONE && react == R_NONE && now - lastPuppyAt > 14000) startEmote(E_PUPPY);   // sigue esperando…
     computeEmote(fxRaw, now, t);   // los emotes mandan sobre behaviors y reacciones
     if (gallery && emote == E_NONE && now - emoteEndedAt > 600) startEmote((Emote)(emoteIdx = emoteIdx % (E_COUNT - 1) + 1));
     // (los reflejos del IMU ganan sobre los behaviors: se calculan después y sobrescriben campos)
